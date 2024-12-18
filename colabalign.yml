@@ -1,0 +1,15 @@
+name: colabalign
+channels:
+  - bioconda
+  - schrodinger
+  - conda-forge
+  - defaults
+dependencies:
+- python=3.12
+- usalign
+- pymol-open-source
+- pip:
+  - numpy
+  - pandas
+  - biopython
+  - treecluster

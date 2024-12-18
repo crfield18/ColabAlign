@@ -1,25 +1,26 @@
-   ColabAlign: Google Colab notebook for pairwise structural alignment of protein structures.
+ColabAlign: Google Colab notebook for pairwise structural alignment of protein structures.
 
-    References to cite:
+References to cite:
 
-    TM-align / mTM-align / US-align:
-        (1) Yang Zhang, Jeffrey Skolnick (2004) Proteins: Struct., Funct., Bioinf.  57(4), 702-710.
-        (2) Runze Dong, Zhenling Peng, Yang Zhang, Jianyi Yang (2018) Bioinformatics. 34(10), 1719-1725.
-        (3) Chengxin Zhang, Morgan Shine, Anna Marie Pyle, Yang Zhang (2022) Nat Methods. 19(9), 1109-1115.
-        (4) Chengxin Zhang, Anna Marie Pyle (2022) iScience. 25(10), 105218.
+ColabAlign:
+    (1) Christopher R. Field (2024), crfield18/ColabAlign: v0.1.0 (Version v0.1.0-prerelease). Zenodo.
+        https://doi.org/10.5281/ZENODO.14169501
 
-    BioPython:
-        (1) Peter J. A. Cock, Tiago Antao, Jeffrey T. Chang, Brad A. Chapman, Cymon J. Cox, Andrew Dalke,
-            Iddo Friedberg, Thomas Hamelryck, Frank Kauff, Bartek Wilczynski, Michiel J. L. de Hoon (2009),
-            Bioinformatics. 25(11), 1422–1423.
+TM-align / mTM-align / US-align:
+    (1) Yang Zhang, Jeffrey Skolnick (2004) Proteins: Struct., Funct., Bioinf.  57(4), 702-710.
+    (2) Runze Dong, Zhenling Peng, Yang Zhang, Jianyi Yang (2018) Bioinformatics. 34(10), 1719-1725.
+    (3) Chengxin Zhang, Morgan Shine, Anna Marie Pyle, Yang Zhang (2022) Nat Methods. 19(9), 1109-1115.
+    (4) Chengxin Zhang, Anna Marie Pyle (2022) iScience. 25(10), 105218.
 
-    ColabAlign:
-        (1) Reference to come.
+BioPython:
+    (1) Peter J. A. Cock, Tiago Antao, Jeffrey T. Chang, Brad A. Chapman, Cymon J. Cox, Andrew Dalke,
+        Iddo Friedberg, Thomas Hamelryck, Frank Kauff, Bartek Wilczynski, Michiel J. L. de Hoon (2009),
+        Bioinformatics. 25(11), 1422–1423.
 
-    DISCLAIMER:
-        Permission to use, copy, modify, and distribute this program for 
-        any purpose, with or without fee, is hereby granted, provided that
-        the notices on the head, the reference information, and this
-        copyright notice appear in all copies or substantial portions of 
-        the Software. It is provided "as is" without express or implied 
-        warranty.
+DISCLAIMER:
+    Permission to use, copy, modify, and distribute this program for
+    any purpose, with or without fee, is hereby granted, provided that
+    the notices on the head, the reference information, and this
+    copyright notice appear in all copies or substantial portions of
+    the Software. It is provided "as is" without express or implied
+    warranty.
