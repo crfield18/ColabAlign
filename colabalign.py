@@ -76,11 +76,12 @@ class StructureAligner():
 
         if input_pdb.suffix not in ('.pdb', '.cif'):
             raise ValueError(f'Invalid file extension: {input_pdb.suffix}. Expected .pdb or .cif')
-        
+
         self.file_type = input_pdb.suffix
 
     def transform_coords(self) -> Path:
-        with open(self.input_pdb, 'r', encoding='UTF8') as input_file, open(self.output_pdb, 'w', encoding='UTF8') as output_file:
+        with (open(self.input_pdb, 'r', encoding='UTF8') as input_file,
+            open(self.output_pdb, 'w', encoding='UTF8') as output_file):
             for line in input_file:
                 if line.startswith('ATOM  ') or line.startswith('HETATM'):
                     model_parser = UpdateCoords(
@@ -93,9 +94,10 @@ class StructureAligner():
         return self.output_pdb
 
 class UpdateCoords():
-    def __init__(self, atom_line:str, file_format:str, rotation_matrix:np.ndarray, translate_vector:np.ndarray) -> None:
+    def __init__(self, atom_line:str, file_format:str,
+                 rotation_matrix:np.ndarray, translate_vector:np.ndarray) -> None:
         self.atom_line = atom_line
-        self.file_format = file_format
+        self.file_format = file_format.lower()
 
         assert rotation_matrix.shape == (3, 3)
         self.rotation_matrix = rotation_matrix
@@ -103,25 +105,24 @@ class UpdateCoords():
         assert translate_vector.shape == (1, 3)
         self.translation_vector = translate_vector
 
-        if self.file_format not in ('.pdb', '.cif'):
-            raise ValueError(f'Invalid file format: {self.file_format}. Expected .pdb or .cif')
-
-        # Legacy PDB files have set columns for 
-        if self.file_format == '.pdb':
-            self.group_pdb = atom_line[0:6]     # Record type
-            self.x = atom_line[30:38]            # Orthogonal coordinates for X in Angstroms
-            self.y = atom_line[38:46]            # Orthogonal coordinates for Y in Angstroms
-            self.z = atom_line[46:54]            # Orthogonal coordinates for Z in Angstroms
-
-        # mmCIF/PDBx files contain the same info as legacy PDB files
-        # but only care about the order of each piece of info, rather
-        # than the specific columns
-        elif self.file_format == '.cif':
-            self.line_contents = [t for t in atom_line.split(' ') if t != '']
-            self.group_pdb = self.line_contents[0]           # _atom_site.group_PDB
-            self.x = self.line_contents[10]                  # _atom_site.Cartn_x
-            self.y = self.line_contents[11]                  # _atom_site.Cartn_y
-            self.z = self.line_contents[12]                  # _atom_site.Cartn_z
+        match self.file_format:
+            case '.pdb':
+                # Legacy PDB format
+                self.group_pdb = atom_line[0:6]      # Record type
+                self.x = atom_line[30:38]            # X coordinate
+                self.y = atom_line[38:46]            # Y coordinate
+                self.z = atom_line[46:54]            # Z coordinate
+            case '.cif':
+                # mmCIF/PDBx files contain the same info as legacy PDB files
+                # but only care about the order of each piece of info, rather
+                # than the specific columns
+                self.line_contents = [t for t in atom_line.split() if t != '']
+                self.group_pdb = self.line_contents[0]           # _atom_site.group_PDB
+                self.x = self.line_contents[10]                  # _atom_site.Cartn_x
+                self.y = self.line_contents[11]                  # _atom_site.Cartn_y
+                self.z = self.line_contents[12]                  # _atom_site.Cartn_z
+            case _:
+                raise ValueError(f'Invalid file format: {self.file_format}. Expected .pdb or .cif')
 
     def _get_coords(self) -> np.ndarray:
         return np.array([float(self.x), float(self.y), float(self.z)])
@@ -189,7 +190,7 @@ class ColabAlign():
         self.cores = script_args.cores
         if self.cores <= 0:
             warnings.warn(
-                f'User-defined core count cannot be lower than 1. Core count set to default (1).'
+                'User-defined core count cannot be lower than 1. Core count set to default (1).'
             )
             self.cores = 1
         if self.cores > cpu_count():
@@ -244,19 +245,24 @@ class ColabAlign():
         transform_mx_reverse = self._reverse_transformation_matrix(transform_mx_forward.astype(np.float64))
         return tm_1, tm_2, transform_mx_forward, transform_mx_reverse
 
-    def _results_map_to_df(self, results_dict:dict):
-        tuples = (
-            (model1, model2, value['tm_forward'], value['transform_mx_forward'], value['tm_reverse'], value['transform_mx_reverse'])
-            for model1, model2_dict in results_dict.items()
-            for model2, value in model2_dict.items()
-        )
-        df = pd.DataFrame(tuples, columns=['model1', 'model2', 'tm_forward', 'transform_mx_forward', 'tm_reverse', 'transform_mx_reverse'])
-        return df
+    def _results_map_to_df(self, results_dict: dict) -> pd.DataFrame:
+        def generate_tuples():
+            for model1, model2_dict in results_dict.items():
+                for model2, value in model2_dict.items():
+                    yield (model1, model2, value['tm_forward'],
+                        value['transform_mx_forward'],
+                        value['tm_reverse'],
+                        value['transform_mx_reverse'])
+
+        return pd.DataFrame(generate_tuples(),
+                        columns=['model1', 'model2', 'tm_forward',
+                                'transform_mx_forward', 'tm_reverse',
+                                'transform_mx_reverse'])
 
     def _find_matrix_in_array(self, row, model):
         if row['model1'] == model:
             return row['transform_mx_forward']
-        elif row['model2'] == model:
+        if row['model2'] == model:
             return row['transform_mx_reverse']
         return None
 
@@ -335,7 +341,7 @@ class ColabAlign():
                 continue
 
             max_tm = max(row['tm_forward'], row['tm_reverse'])
-            
+
             i, j = model_index[row['model1']], model_index[row['model2']]
             matrix_data[i, j] = max_tm
             matrix_data[j, i] = max_tm
@@ -415,14 +421,20 @@ class ColabAlign():
 
             if cluster_num == -1:
                 for model in model_list:
-                    copy(src=self.models_path.joinpath(f'{model}.pdb'),dst=cluster_output_dir.joinpath(f'{model}.pdb'))
+                    copy(
+                        src=self.models_path.joinpath(f'{model}.pdb'),
+                        dst=cluster_output_dir.joinpath(f'{model}.pdb')
+                        )
                 continue
 
-            sub_matrix = self.tmmatrix.loc[[m for m in model_list], [m for m in model_list]]
+            sub_matrix = self.tmmatrix.loc[list(model_list), list(model_list)]
 
             reference_model_name = sub_matrix.max().idxmax()
 
-            copy(src=self.models_path.joinpath(f'{reference_model_name}.pdb'),dst=cluster_output_dir.joinpath(f'{reference_model_name}.pdb'))
+            copy(
+                src=self.models_path.joinpath(f'{reference_model_name}.pdb'),
+                dst=cluster_output_dir.joinpath(f'{reference_model_name}.pdb')
+                )
 
             cluster_df = self.usalign_df[(self.usalign_df['model1'] == reference_model_name) | (self.usalign_df['model2'] == reference_model_name)]
 
@@ -430,7 +442,11 @@ class ColabAlign():
                 if model == reference_model_name:
                     continue
 
-                mx = cluster_df.apply(self._find_matrix_in_array,axis=1,args=(model,)).dropna().iloc[0]
+                mx = cluster_df.apply(
+                    self._find_matrix_in_array,
+                    axis=1,
+                    args=(model,)
+                    ).dropna().iloc[0]
 
                 if mx is not None:
                     aligner = StructureAligner(input_pdb=self.models_path.joinpath(f'{model}.pdb'),
