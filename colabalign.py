@@ -385,7 +385,7 @@ class ColabAlign():
   def tree_clustering(self):
     print('Calculating clusters from structural tree.')
     # threshold_range = [f'{f:.2f}' for f in np.linspace(0.05, 1.00, 20)]
-    threshold_range = [self.threshold]
+    threshold_range = [str(self.threshold)]
     completed_processes = []
 
     for f in threshold_range:
