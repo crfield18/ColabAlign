@@ -305,9 +305,9 @@ class ColabAlign():
               'transform_mx_reverse': transform_mx_reverse
             }
 
-          # Handle any errors in stderr
-          if stderr != b'' or stdout == b'':
-            print(f"Error for models {model1, model2}: {stderr.decode(errors='ignore')}")
+            # Handle any errors in stderr
+            if stderr != b'' or stdout == b'':
+              print(f"Error for models {model1, model2}: {stderr.decode(errors='ignore')}")
 
         except Exception as e:
           print(f"Error occurred: {e}")
@@ -384,7 +384,8 @@ class ColabAlign():
 
   def tree_clustering(self):
     print('Calculating clusters from structural tree.')
-    threshold_range = [f'{f:.2f}' for f in np.linspace(0.05, 1.00, 20)]
+    # threshold_range = [f'{f:.2f}' for f in np.linspace(0.05, 1.00, 20)]
+    threshold_range = [self.threshold]
     completed_processes = []
 
     for f in threshold_range:
