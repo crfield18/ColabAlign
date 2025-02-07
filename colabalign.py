@@ -45,8 +45,9 @@ def script_args():
     '-t', '--threshold', 
     type=float,
     required=False,
-    default=0.25,
-    help='Set threshold for clustering (Default = 0.25).'
+    nargs='+',
+    default=[0.25],
+    help='Set thresholds for clustering (Default = 0.25). Multiple values can be provided.'
   )
 
   parser.add_argument(
@@ -161,7 +162,7 @@ class ColabAlign():
     self.model_list = sorted(self.model_list)
 
     # Handle user-defined clustering threshold
-    self.threshold = script_args.threshold
+    self.thresholds = script_args.threshold
 
     # Handle input and output paths and create necessary directories
     print('Setting up file structure.')
@@ -174,7 +175,6 @@ class ColabAlign():
       self.models_path,
       self.results_path,
       self.results_path.joinpath('clusters'),
-      self.results_path.joinpath(f'clusters/{self.threshold:.2f}')
       ):
       Path.mkdir(output_subdir, exist_ok=True, parents=True)
 
@@ -384,16 +384,15 @@ class ColabAlign():
 
   def tree_clustering(self):
     print('Calculating clusters from structural tree.')
-    # threshold_range = [f'{f:.2f}' for f in np.linspace(0.05, 1.00, 20)]
-    threshold_range = [str(self.threshold)]
+
     completed_processes = []
 
-    for f in threshold_range:
+    for thresh in self.thresholds:
       cmd = [
         'TreeCluster.py',
            '-i', self.results_path.joinpath('colabalign.tree').as_posix(),
-           '-o', self.results_path.joinpath(f'clusters/{f}.tsv').as_posix(),
-          '-t', f
+           '-o', self.results_path.joinpath(f'clusters/{thresh:.2f}.tsv').as_posix(),
+          '-t', f'{thresh:.2f}'
           ]
       with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
         _, _ = process.communicate()
@@ -405,55 +404,57 @@ class ColabAlign():
     # Make lists of models for each cluster
     clusters = {}
 
-    with open(self.results_path.joinpath(f'clusters/{self.threshold:.2f}.tsv'), 'r', encoding='UTF8') as cluster_file:
-      for line in cluster_file:
-        if line.startswith('SequenceName'):
+    for thresh in self.thresholds:
+      with open(self.results_path.joinpath(f'clusters/{thresh:.2f}.tsv'), 'r', encoding='UTF8') as cluster_file:
+        for line in cluster_file:
+          if line.startswith('SequenceName'):
+            continue
+          line_split = line.split('\t')
+          cluster_num = int(line_split[1].strip('\n'))
+          if cluster_num not in clusters:
+            clusters[cluster_num] = []
+          clusters[cluster_num].append(line_split[0].strip())
+
+      print(f'Clustering Threshold: {thresh:.2f}')
+      for cluster_num, model_list in clusters.items():
+        print(f'Aligning cluster: {cluster_num}')
+        cluster_output_dir = self.results_path.joinpath(f'clusters/{thresh:.2f}/{cluster_num}')
+        Path.mkdir(cluster_output_dir, exist_ok=True, parents=True)
+
+        if cluster_num == -1:
+          for model in model_list:
+            copy(
+              src=self.models_path.joinpath(f'{model}.pdb'),
+              dst=cluster_output_dir.joinpath(f'{model}.pdb')
+              )
           continue
-        line_split = line.split('\t')
-        cluster_num = int(line_split[1].strip('\n'))
-        if cluster_num not in clusters:
-          clusters[cluster_num] = []
-        clusters[cluster_num].append(line_split[0].strip())
 
-    for cluster_num, model_list in clusters.items():
-      print(f'Aligning cluster: {cluster_num}')
-      cluster_output_dir = self.results_path.joinpath(f'clusters/{self.threshold:.2f}/{cluster_num}')
-      Path.mkdir(cluster_output_dir, exist_ok=True, parents=True)
+        sub_matrix = self.tmmatrix.loc[list(model_list), list(model_list)]
 
-      if cluster_num == -1:
+        reference_model_name = sub_matrix.max().idxmax()
+
+        with (open(self.models_path.joinpath(f'{reference_model_name}.pdb'), 'r', encoding='UTF8') as input_ref,
+              open(cluster_output_dir.joinpath(f'{reference_model_name}.pdb'), 'w', encoding='UTF8') as output_ref):
+            output_ref.write(f'REMARK 900\nREMARK 900 RELATED ENTRIES\nREMARK 900 REFERENCE MODEL FOR CLUSTER {cluster_num}\n')
+            output_ref.write(input_ref.read())
+
+        cluster_df = self.usalign_df[(self.usalign_df['model1'] == reference_model_name) | (self.usalign_df['model2'] == reference_model_name)]
+
         for model in model_list:
-          copy(
-            src=self.models_path.joinpath(f'{model}.pdb'),
-            dst=cluster_output_dir.joinpath(f'{model}.pdb')
-            )
-        continue
+          if model == reference_model_name:
+            continue
 
-      sub_matrix = self.tmmatrix.loc[list(model_list), list(model_list)]
+          mx = cluster_df.apply(
+            self._find_matrix_in_array,
+            axis=1,
+            args=(model,)
+            ).dropna().iloc[0]
 
-      reference_model_name = sub_matrix.max().idxmax()
-
-      with (open(self.models_path.joinpath(f'{reference_model_name}.pdb'), 'r', encoding='UTF8') as input_ref,
-            open(cluster_output_dir.joinpath(f'{reference_model_name}.pdb'), 'w', encoding='UTF8') as output_ref):
-          output_ref.write(f'REMARK 900\nREMARK 900 RELATED ENTRIES\nREMARK 900 REFERENCE MODEL FOR CLUSTER {cluster_num}\n')
-          output_ref.write(input_ref.read())
-
-      cluster_df = self.usalign_df[(self.usalign_df['model1'] == reference_model_name) | (self.usalign_df['model2'] == reference_model_name)]
-
-      for model in model_list:
-        if model == reference_model_name:
-          continue
-
-        mx = cluster_df.apply(
-          self._find_matrix_in_array,
-          axis=1,
-          args=(model,)
-          ).dropna().iloc[0]
-
-        if mx is not None:
-          aligner = StructureAligner(input_pdb=self.models_path.joinpath(f'{model}.pdb'),
-                      output_pdb=cluster_output_dir.joinpath(f'{model}.pdb'),
-                      transform_matrix=mx)
-          aligner.transform_coords()
+          if mx is not None:
+            aligner = StructureAligner(input_pdb=self.models_path.joinpath(f'{model}.pdb'),
+                        output_pdb=cluster_output_dir.joinpath(f'{model}.pdb'),
+                        transform_matrix=mx)
+            aligner.transform_coords()
 
 # For running locally
 def local():
