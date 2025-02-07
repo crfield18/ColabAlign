@@ -401,10 +401,8 @@ class ColabAlign():
     for process in completed_processes:
       process.wait()
 
-    # Make lists of models for each cluster
-    clusters = {}
-
     for thresh in self.thresholds:
+      clusters = {}
       with open(self.results_path.joinpath(f'clusters/{thresh:.2f}.tsv'), 'r', encoding='UTF8') as cluster_file:
         for line in cluster_file:
           if line.startswith('SequenceName'):
