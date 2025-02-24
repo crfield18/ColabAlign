@@ -8,6 +8,7 @@ dependencies:
 - python=3.12
 - usalign
 - pymol-open-source
+- pip
 - pip:
   - numpy
   - pandas
