@@ -8,6 +8,7 @@ import subprocess
 import warnings
 from shutil import copy
 from collections import defaultdict
+import errno
 
 import pandas as pd
 import numpy as np
@@ -275,9 +276,15 @@ class ColabAlign():
 
         print('Creating hardlinks for model files.')
         for model in self.model_list:
-            hardlink_path = self.models_path.joinpath(model.name)
-            if not hardlink_path.exists():
-                hardlink_path.hardlink_to(model.resolve())
+            link_path = self.models_path.joinpath(model.name)
+            # Have had issues with hardlinking across devices/file systems (particularly on HPC)
+            # so we default to symlinking if hardlinking (preferred) fails
+            if not link_path.exists():
+                try:
+                    link_path.hardlink_to(model.resolve())
+                except OSError as e:
+                    if e.errno == errno.EXDEV:  # Invalid cross-device link error
+                        link_path.symlink_to(model.resolve())
 
         # Calculate all possible combinations of models, then create discrete lists of comparisons
         # on a per-model basis. This enables us to run multiple, concurrent US-align instances and
