@@ -499,17 +499,10 @@ class ColabAlign():
                         aligner.transform_coords()
 
 # For running locally
-def local():
+def main():
     local_instance = ColabAlign(script_args())
     local_instance.pairwise_alignment()
     local_instance.tree_clustering()
 
-# For running on Google Colab
-def colab(args):
-    # The colab notebook sets the user arguments with sys.argv
-    colab_instance = ColabAlign(args)
-    colab_instance.pairwise_alignment()
-    colab_instance.tree_clustering()
-
 if __name__ == '__main__':
-    local()
+    main()
