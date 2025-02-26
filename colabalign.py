@@ -1,14 +1,14 @@
-from os import cpu_count
+import errno
+import subprocess
+import warnings
+from os import cpu_count, getpid
 from pathlib import Path
 from argparse import ArgumentParser
 from math import isnan
 from itertools import combinations
 from concurrent.futures import ProcessPoolExecutor, as_completed
-import subprocess
-import warnings
 from shutil import copy
 from collections import defaultdict
-import errno
 
 import pandas as pd
 import numpy as np
@@ -225,6 +225,8 @@ class ColabAlign():
         return model1, model2, stdout, stderr
 
     def _usalign_process(self, job):
+        worker_id = getpid()  # Get the process ID to identify the worker
+        print(f"Worker {worker_id} starting with {len(job)} pairs")
         results = []
         for pair in job:
             results.append(self._run_usalign(pair[0], pair[1]))
