@@ -9,11 +9,14 @@ from itertools import combinations
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from shutil import copy
 from collections import defaultdict
+from time import time
 
 import pandas as pd
 import numpy as np
 from Bio import Phylo
 from Bio.Phylo.TreeConstruction import DistanceTreeConstructor, DistanceMatrix
+
+from mustang import GetRepresentatives
 
 def script_args():
     parser = ArgumentParser(description='Script description goes here.')
@@ -226,7 +229,7 @@ class ColabAlign():
 
     def _usalign_process(self, job):
         worker_id = getpid()  # Get the process ID to identify the worker
-        print(f"Worker {worker_id} starting with {len(job)} pairs")
+        print(f'Worker {worker_id} starting with {len(job)} pairs')
         results = []
         for pair in job:
             results.append(self._run_usalign(pair[0], pair[1]))
@@ -323,10 +326,10 @@ class ColabAlign():
 
                         # Handle any errors in stderr
                         if stderr != b'' or stdout == b'':
-                            print(f"Error for models {model1, model2}: {stderr.decode(errors='ignore')}")
+                            print(f'Error for models {model1, model2}: {stderr.decode(errors='ignore')}')
 
                 except Exception as e:
-                    print(f"Error occurred: {e}")
+                    print(f'Error occurred: {e}')
 
                 # Append this process's results
                 process_results.append(process_hashmap)
@@ -374,6 +377,7 @@ class ColabAlign():
         )
         self.tmmatrix.to_csv(self.results_path.joinpath('us-align_score_matrix.csv'), index=True)
 
+    def grow_tree(self):
         print('Generating phylogenetic tree.')
         # Invert US-align scores to make them suitable for distances on a phylogenetic tree.
         # More similar pairs of models (i.e., higher TM-scores) have shorter distances to each
@@ -429,7 +433,7 @@ class ColabAlign():
             process.wait()
 
         for thresh in self.thresholds:
-            clusters = {}
+            self.clusters = {}
             with open(
                 self.results_path.joinpath(f'clusters/{thresh:.2f}.tsv'),
                 'r', encoding='UTF8') as cluster_file:
@@ -438,12 +442,12 @@ class ColabAlign():
                         continue
                     line_split = line.split('\t')
                     cluster_num = int(line_split[1].strip('\n'))
-                    if cluster_num not in clusters:
-                        clusters[cluster_num] = []
-                    clusters[cluster_num].append(line_split[0].strip())
+                    if cluster_num not in self.clusters:
+                        self.clusters[cluster_num] = []
+                    self.clusters[cluster_num].append(line_split[0].strip())
 
             print(f'Clustering Threshold: {thresh:.2f}')
-            for cluster_num, model_list in clusters.items():
+            for cluster_num, model_list in self.clusters.items():
                 print(f'Aligning cluster: {cluster_num}')
                 cluster_output_dir = self.results_path.joinpath(
                     f'clusters/{thresh:.2f}/{cluster_num}'
@@ -498,11 +502,39 @@ class ColabAlign():
                             transform_matrix=mx)
                         aligner.transform_coords()
 
-# For running locally
+    # Scripts stored in mustang.py
+    # Use MUSTANG and MView to find the sequences that most closely fits the consensus for the cluster
+    def find_representatives(self):
+        sorted_clusters = lambda x: sorted(self.clusters.items(), key=lambda x: len(x[1]), reverse=True)
+        reps_parser = GetRepresentatives(clusters=sorted_clusters(self.clusters), threads=self.cores)
+        reps_parser.get_representatives(self.results_path)
+
 def main():
+    main_time_start = time()
+
     local_instance = ColabAlign(script_args())
+
+    align_time_start = time()
+    print('Starting pairwise alignment.')
     local_instance.pairwise_alignment()
+    print(f'Pairwise alignment elapsed time:\t{time() - align_time_start:.2f} s')
+
+    tree_time_start = time()
+    print('Starting dendrogram calculation.')
+    local_instance.grow_tree()
+    print(f'Dendrogram calculation elapsed time:\t{time() - tree_time_start:.2f} s')
+
+    tree_cluster_time_start = time()
+    print('Starting dendrogram clustering.')
     local_instance.tree_clustering()
+    print(f'Dendrogram clustering elapsed time:\t{time() - tree_cluster_time_start:.2f} s')
+
+    reps_time_start = time()
+    print('Finding cluster representatives.')
+    local_instance.find_representatives()
+    print(f'Representative calculation elapsed time:\t{time() - reps_time_start:.2f} s')
+ 
+    print(f'Total elapsed time:\t{time() - main_time_start:.2f} s')
 
 if __name__ == '__main__':
     main()
