@@ -1,14 +1,19 @@
 name: colabalign
 channels:
-  - bioconda
   - conda-forge
+  - bioconda
   - defaults
 dependencies:
+# Python and related packages
   - python=3.12
-  - usalign
-  - mustang
-  - mview
   - numpy
   - pandas
   - biopython
+  - bs4
+# Bioinformatics tools
   - treecluster
+  - usalign
+  - mustang
+  - mview
+# # Requires the --platform osx-64 flag when creating the environment on ARM-based Macs
+#   - t-coffee 
