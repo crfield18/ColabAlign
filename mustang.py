@@ -4,7 +4,7 @@ import subprocess
 from collections import defaultdict
 from bs4 import BeautifulSoup
 from Bio import SeqIO
-from numpy import NaN
+from math import inf
 
 class GetRepresentatives():
     def __init__(self, clusters: dict, threads: int = 1) -> None:
@@ -114,8 +114,8 @@ class GetRepresentatives():
         closest_seq = {
             'record_name': '',
             'sequence': '',
-            'score': NaN,
-            'max_score': NaN
+            'score': -inf,
+            'max_score': -inf
             }
 
         with open(mview_afasta, 'r', encoding='UTF8') as consensus_fasta:
@@ -134,7 +134,7 @@ class GetRepresentatives():
                     else:
                         score -= 1
                 
-                if score > closest_seq.get('score') or closest_seq.get('score') is NaN:
+                if score > closest_seq.get('score') or closest_seq.get('score') is -inf:
                     closest_seq = {
                         'record_name': record.name,
                         'sequence': record.seq,
@@ -185,11 +185,11 @@ class GetRepresentatives():
 
         representatives = defaultdict(
             lambda : {
-            NaN: {
+            -inf: {
                 'record_name': None,
                 'sequence': None,
-                'score': NaN,
-                'max_score': NaN
+                'score': -inf,
+                'max_score': -inf
             }
             }
             )
