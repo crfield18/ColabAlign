@@ -326,7 +326,7 @@ class ColabAlign():
 
                         # Handle any errors in stderr
                         if stderr != b'' or stdout == b'':
-                            print(f'Error for models {model1, model2}: {stderr.decode(errors='ignore')}')
+                            print(f'Error for models {model1, model2}: {stderr.decode(errors="ignore")}')
 
                 except Exception as e:
                     print(f'Error occurred: {e}')
