@@ -1,10 +1,11 @@
+from math import inf
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import subprocess
 from collections import defaultdict
 from bs4 import BeautifulSoup
 from Bio import SeqIO
-from math import inf
+
 
 class GetRepresentatives():
     def __init__(self, clusters: dict, threads: int = 1) -> None:
@@ -215,4 +216,4 @@ class GetRepresentatives():
 
         with open(results_path.joinpath(f'clusters/{threshold}/threshold_{threshold}_cluster_representatives.fasta'), 'w', encoding='UTF8') as representative_fasta:
             for num, entry in dict(sorted(representatives.items(), key=lambda x: int(x[0]))).items():
-                representative_fasta.write(f'> Cluster {num}: {entry.get('record_name')} (alignment score {entry.get('score')}/{entry.get('max_score')})\n{str(entry.get('sequence')).replace("-", "")}\n')
+                representative_fasta.write(f'> Cluster {num}: {entry.get("record_name")} (alignment score {entry.get("score")}/{entry.get("max_score")})\n{str(entry.get("sequence")).replace("-", "")}\n')
