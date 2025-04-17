@@ -6,13 +6,13 @@ from collections import defaultdict
 from bs4 import BeautifulSoup
 from Bio import SeqIO
 
-
 class GetRepresentatives():
     def __init__(self, clusters: dict, threads: int = 1) -> None:
         self.threads = threads
         self.clusters = clusters
 
-    def _run_mustang(self, pdb_dir: Path, pdb_names: list, cluster_num: int | str, threshold: int | str):
+    def _run_mustang(self, pdb_dir: Path, pdb_names: list,
+                     cluster_num: int | str, threshold: int | str):
         cmd = [
             'mustang',
             '-p', str(pdb_dir),
@@ -21,12 +21,13 @@ class GetRepresentatives():
             '-s', 'OFF'
         ]
 
+        # This will add each PDB name as a separate argument so MUSTANG won't throw a fit
         cmd.extend(['-i'])
-        cmd.extend(pdb_names)  # This will add each PDB name as a separate argument so MUSTANG won't throw a fit
+        cmd.extend(pdb_names)
 
         with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
             try:
-                with open(pdb_dir.joinpath(f'threshold_{threshold}_cluster_{cluster_num}_mustang.txt'), 'w') as mustang_log:
+                with open(pdb_dir.joinpath(f'threshold_{threshold}_cluster_{cluster_num}_mustang.txt'), 'w', encoding='UTF8') as mustang_log:
                     stdout, stderr = process.communicate()
                     mustang_log.write(stdout.decode())
             finally:
@@ -50,24 +51,25 @@ class GetRepresentatives():
 
         with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
             try:
-                with open(input_alignment.with_suffix('.html'), 'w') as mview_file:
+                with open(input_alignment.with_suffix('.html'), 'w', encoding='UTF8') as mview_file:
                     stdout, stderr = process.communicate()
                     mview_file.write(stdout.decode())
             finally:
                 process.terminate()
         return stdout, stderr
-    
+
     def _parse_mview(self, html_file: Path):
         assert html_file.suffix == '.html', 'Input file must be an HTML file'
         assert html_file.exists(), f'File does not exist: {html_file}'
-        
+
         with open(html_file, 'r', encoding='utf-8') as in_file:
             html_content = in_file.read()
 
         soup = BeautifulSoup(html_content, 'html.parser')
         lines = soup.get_text().split('\n')
 
-        with open(html_file.with_name(f'{html_file.stem}_consensus.afasta'), 'w', encoding='utf-8') as out_file:
+        with open(html_file.with_name(f'{html_file.stem}_consensus.afasta'),
+                  'w', encoding='utf-8') as out_file:
             for line in lines:
                 if not line.lstrip().startswith('consensus'):
                     continue
@@ -123,18 +125,18 @@ class GetRepresentatives():
             # Using the 60% consensus sequences to have the largest number of non-gap
             # residues as possible
             consensus = str(list(SeqIO.parse(consensus_fasta, 'fasta'))[-1].seq)
-        
+
         with open(mustang_afasta, 'r', encoding='UTF8') as cluster_aligned_fasta:
             records = list(SeqIO.parse(cluster_aligned_fasta, 'fasta'))
             for record in records:
                 score = 0
                 # Need to change - to * to match the gap character in the BLOSUM matrix
-                for i, (cons_char, seq_char) in enumerate(zip(consensus, record.seq)):
+                for _, (cons_char, seq_char) in enumerate(zip(consensus, record.seq)):
                     if _is_match(cons_char, seq_char):
                         score += 1
                     else:
                         score -= 1
-                
+
                 if score > closest_seq.get('score') or closest_seq.get('score') is -inf:
                     closest_seq = {
                         'record_name': record.name,
@@ -157,7 +159,7 @@ class GetRepresentatives():
         stdout, stderr = self._run_mview(alignment_file)
         if stderr:
             print(f'Error in MView: {stderr.decode()}')
-        
+
         self._parse_mview(pdb_dir.joinpath(f'threshold_{threshold}_cluster_{cluster_num}_mustang.html'))
         nearest_sequence_to_consensus = self._find_nearest_sequence(
             mustang_afasta=alignment_file,
