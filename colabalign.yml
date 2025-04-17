@@ -5,7 +5,7 @@ channels:
   - defaults
 dependencies:
 # Python and related packages
-  - python=3.12
+  - python=3.11
   - numpy
   - pandas
   - biopython
