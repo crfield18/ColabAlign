@@ -65,7 +65,7 @@ def script_args():
 
     return parser.parse_args()
 
-class StructureAligner():
+class StructureAligner:
     def __init__(self, input_pdb:Path, output_pdb:Path, transform_matrix:np.ndarray) -> None:
         self.input_pdb = input_pdb
         self.output_pdb = output_pdb
@@ -91,7 +91,7 @@ class StructureAligner():
             output_file.write('TER\nEND\n')
         return self.output_pdb
 
-class UpdateCoords():
+class UpdateCoords:
     def __init__(self, atom_line:str, file_format:str,
                  rotation_matrix:np.ndarray, translate_vector:np.ndarray) -> None:
         self.atom_line = atom_line
@@ -151,7 +151,7 @@ class UpdateCoords():
         self.line_contents[12] = f'{transformed_coords[0][2]:8.3f}'
         return '\t'.join(self.line_contents)
 
-class ColabAlign():
+class ColabAlign:
     def __init__(self, args) -> None:
         # Handle model list generation from user input
         self.model_list = []
