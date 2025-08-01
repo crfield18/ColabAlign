@@ -210,6 +210,8 @@ class ColabAlign:
         rotation_mx_forward = transform_mx_forward[:, 1:4]
 
         rotation_mx_reverse = rotation_mx_forward.T
+
+        # This step is matrix multiplication NOT a dot product (np.dot handles both)
         translate_v_reverse = - np.dot(rotation_mx_reverse, translate_v_forward)
         transform_mx_reverse = np.hstack((translate_v_reverse, rotation_mx_reverse))
 
