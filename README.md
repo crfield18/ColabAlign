@@ -1,4 +1,4 @@
-# ColabAlign
+ # ColabAlign
 
 ## Fast pairwise protein secondary structure comparisons using multiprocessing
 
@@ -18,13 +18,15 @@ ColabAlign.py is designed to work for Google Colab and running on local machines
 
 `conda env create -f colabalign.yml`
 
-**On ARM-based Macs (M1 and onwards)**, an extra flag is needed that allows x86-only scripts:
+**On ARM-based Macs (M1 onwards)**
 
-`conda env create --platform osx-64 -f colabalign.yml`
-
-This also requires Rosetta 2 to be installed:
+Rosetta 2 is required:
 
 `softwareupdate --install-rosetta`
+
+and an extra flag is needed that allows x86-only scripts:
+
+`conda env create --platform osx-64 -f colabalign.yml`
 
 ---
 
