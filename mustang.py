@@ -5,6 +5,7 @@ import subprocess
 from collections import defaultdict
 from bs4 import BeautifulSoup
 from Bio import SeqIO
+from tqdm.auto import tqdm as tqdm_auto
 
 class GetRepresentatives():
     def __init__(self, clusters: dict, threads: int = 1) -> None:
@@ -148,7 +149,6 @@ class GetRepresentatives():
         return closest_seq
 
     def _run_mustang_and_mview(self, pdb_dir: Path, pdb_names: list, cluster_num: int | str, threshold: int | str):
-        print(f'Calculating representative for cluster:\t{cluster_num}')
         if not pdb_dir.joinpath(f'threshold_{threshold}_cluster_{cluster_num}_mustang.afasta').exists():
             stdout, stderr = self._run_mustang(pdb_dir, pdb_names, cluster_num, threshold)
             if stderr:
@@ -199,16 +199,30 @@ class GetRepresentatives():
 
         # Run MUSTANG in parallel for each cluster
         with ProcessPoolExecutor(max_workers=self.threads) as executor:
-            futures = [
-                executor.submit(
+            total_clusters = len(all_clusters)
+
+            total_bar = tqdm_auto(
+                total=total_clusters,
+                desc='Total clusters',
+                unit=' reps chosen',
+                dynamic_ncols=True,
+                leave=True,
+            )
+
+            # Submit jobs and attach callbacks to update the total bar
+            futures = []
+            for _, info in all_clusters.items():
+                fut = executor.submit(
                     self._run_mustang_and_mview,
                     pdb_dir=info['dir'],
                     pdb_names=[f'/{f.name}' for f in info['dir'].iterdir() if f.suffix == '.pdb'],
                     cluster_num=info['cluster'],
                     threshold=info['threshold']
                 )
-                for _, info in all_clusters.items()
-            ]
+
+                fut.add_done_callback(lambda _: total_bar.update(1))
+                futures.append(fut)
+
 
             for future in as_completed(futures):
                 _, stderr, cluster_representative, cluster, threshold = future.result()
@@ -219,3 +233,4 @@ class GetRepresentatives():
         with open(results_path.joinpath(f'clusters/{threshold}/threshold_{threshold}_cluster_representatives.fasta'), 'w', encoding='UTF8') as representative_fasta:
             for num, entry in dict(sorted(representatives.items(), key=lambda x: int(x[0]))).items():
                 representative_fasta.write(f'> Cluster {num}: {entry.get("record_name")} (alignment score {entry.get("score")}/{entry.get("max_score")})\n{str(entry.get("sequence")).replace("-", "")}\n')
+

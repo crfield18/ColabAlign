@@ -273,7 +273,7 @@ class ColabAlign:
             return row['transform_mx_reverse']
         return None
 
-    # Make phylogenetic tree from US-align results
+    # Make structural dendrogram from US-align results
     def pairwise_alignment(self):
         def _chunks(lst, n):
             '''Yield n chunks from the list.'''
@@ -417,8 +417,8 @@ class ColabAlign:
         self.tmmatrix.to_csv(self.results_path.joinpath('us-align_score_matrix.csv'), index=True)
 
     def grow_tree(self):
-        print('Generating phylogenetic tree.')
-        # Invert US-align scores to make them suitable for distances on a phylogenetic tree.
+        print('Generating structural dendrogram.')
+        # Invert US-align scores to make them suitable for distances on a structural dendrogram.
         # More similar pairs of models (i.e., higher TM-scores) have shorter distances to each
         # other.
 
@@ -437,7 +437,7 @@ class ColabAlign:
         lower_tri_lists = [[value for value in row if not isnan(value)]
                            for row in lower_tri_df.values.tolist()]
 
-        # Generate phylogenetic tree using the UPGMA clustering method
+        # Generate structural dendrogram using the UPGMA clustering method
         # We can safely ignore the Molecular Clock hypothesis because we are not
         # deriving evolutionary relationships between proteins
         tm_matrix = DistanceMatrix(
@@ -485,9 +485,7 @@ class ColabAlign:
                         self.clusters[cluster_num] = []
                     self.clusters[cluster_num].append(line_split[0].strip())
 
-            print(f'Clustering Threshold: {thresh:.2f}')
             for cluster_num, model_list in self.clusters.items():
-                print(f'Aligning cluster: {cluster_num}')
                 cluster_output_dir = self.results_path.joinpath(
                     f'clusters/{thresh:.2f}/{cluster_num}'
                     )
