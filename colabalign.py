@@ -10,6 +10,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from shutil import copy
 from collections import defaultdict
 from time import time
+from multiprocessing import Pool
+from tqdm.auto import tqdm as tqdm_auto
 
 import pandas as pd
 import numpy as np
@@ -223,15 +225,15 @@ class ColabAlign:
             self.usalign_path,
             self.models_path.joinpath(model1.name).as_posix(),
             self.models_path.joinpath(model2.name).as_posix(),
-            '-outfmt', '2', '-m', '-'
+            '-outfmt', '2', '-m', '-', '-fast'
         ]
         with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
             stdout, stderr = process.communicate()
         return model1, model2, stdout, stderr
 
     def _usalign_process(self, job):
-        worker_id = getpid()  # Get the process ID to identify the worker
-        print(f'Worker {worker_id} starting with {len(job)} pairs')
+        # worker_id = getpid()  # Get the process ID to identify the worker
+        # print(f'Worker {worker_id} starting with {len(job)} pairs')
         results = []
         for pair in job:
             results.append(self._run_usalign(pair[0], pair[1]))
@@ -304,8 +306,41 @@ class ColabAlign:
         process_results = []  # Collect dictionaries from each future
 
         with ProcessPoolExecutor(max_workers=self.cores) as executor:
-            futures = [executor.submit(self._usalign_process, job)
-                       for job in _chunks(list(all_combos), self.cores)]
+            # Build jobs (chunks of pairwise combos)
+            combos_list = list(all_combos)
+
+            # Splitting the jobs into a lot of chunks to make the progess bar have any use at all
+            if len(combos_list) <= int(self.cores*50):
+                chunk_count = int(self.cores)
+            else:
+                chunk_count = int(self.cores*50)
+
+            jobs = list(_chunks(combos_list, chunk_count))
+
+            total_bar = tqdm_auto(
+                total=len(combos_list),
+                desc='Total pairs',
+                unit='pair',
+                dynamic_ncols=True,
+                leave=True,
+            )
+
+            # Submit jobs and attach callbacks to update the total bar
+            futures = []
+            for job in jobs:
+                fut = executor.submit(self._usalign_process, job)
+
+                def _callback(f):
+                    try:
+                        res = f.result()
+                        n = len(res)
+                    except Exception:
+                        n = 0
+                    total_bar.update(n)
+
+                fut.add_done_callback(_callback)
+                futures.append(fut)
+
             for future in as_completed(futures):
                 try:
                     # Default dict set up to make a new empty subdict if the key does not exist
@@ -335,6 +370,8 @@ class ColabAlign:
 
                 # Append this process's results
                 process_results.append(process_hashmap)
+
+            total_bar.close()
 
         # Merge all results into a final dictionary
         usalign_results_map = {}
