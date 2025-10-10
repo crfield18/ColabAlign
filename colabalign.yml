@@ -10,10 +10,9 @@ dependencies:
   - pandas
   - biopython
   - bs4
+  - tqdm
 # Bioinformatics tools
   - treecluster
   - usalign
   - mustang
   - mview
-# # Requires the --platform osx-64 flag when creating the environment on ARM-based Macs
-#   - t-coffee 
