@@ -319,8 +319,8 @@ class ColabAlign:
 
             total_bar = tqdm_auto(
                 total=len(combos_list),
-                desc='Total pairs',
-                unit='pair',
+                desc='Total alignments',
+                unit=' alignment',
                 dynamic_ncols=True,
                 leave=True,
             )
