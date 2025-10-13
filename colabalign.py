@@ -1,7 +1,7 @@
 import errno
 import subprocess
 import warnings
-from os import cpu_count, getpid
+from os import cpu_count
 from pathlib import Path
 from argparse import ArgumentParser
 from math import isnan
@@ -17,12 +17,13 @@ import numpy as np
 from Bio import Phylo
 from Bio.Phylo.TreeConstruction import DistanceTreeConstructor, DistanceMatrix
 from Bio.PDB import PDBParser, MMCIFParser, PDBIO, MMCIFIO
-from Bio.PDB.Structure import Structure
 
 from mustang import GetRepresentatives
 
 def script_args():
-    parser = ArgumentParser(description='Script description goes here.')
+    parser = ArgumentParser(
+        description='Script description goes here.'
+        )
 
     # Required arguments
     parser.add_argument(
@@ -81,11 +82,10 @@ class StructureAligner:
         self.file_type = input_file.suffix
 
     def transform_coords(self) -> Path:
-        # Parse structure using BioPython
         if self.file_type == '.pdb':
             parser = PDBParser(QUIET=True)
             io = PDBIO()
-        else:  # .cif
+        else:
             parser = MMCIFParser(QUIET=True)
             io = MMCIFIO()
         
@@ -103,7 +103,6 @@ class StructureAligner:
                         new_coord = np.dot(rotation_matrix, coord) + translation_vector.flatten()
                         atom.set_coord(new_coord)
         
-        # Write transformed structure
         io.set_structure(structure)
         io.save(str(self.output_file))
         
@@ -111,7 +110,7 @@ class StructureAligner:
 
 class ColabAlign:
     def __init__(self, args) -> None:
-        # Handle model list generation from user input
+
         self.model_list = []
         for user_input in args.input:
             if not user_input.is_file and not user_input.is_dir:
@@ -322,7 +321,6 @@ class ColabAlign:
                 except Exception as e:
                     print(f'Error occurred: {e}')
 
-                # Append this process's results
                 process_results.append(process_hashmap)
 
         # Merge all results into a final dictionary
