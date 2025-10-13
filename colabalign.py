@@ -10,13 +10,14 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from shutil import copy
 from collections import defaultdict
 from time import time
-from multiprocessing import Pool
 from tqdm.auto import tqdm as tqdm_auto
 
 import pandas as pd
 import numpy as np
 from Bio import Phylo
 from Bio.Phylo.TreeConstruction import DistanceTreeConstructor, DistanceMatrix
+from Bio.PDB import PDBParser, MMCIFParser, PDBIO, MMCIFIO
+from Bio.PDB.Structure import Structure
 
 from mustang import GetRepresentatives
 
@@ -68,90 +69,45 @@ def script_args():
     return parser.parse_args()
 
 class StructureAligner:
-    def __init__(self, input_pdb:Path, output_pdb:Path, transform_matrix:np.ndarray) -> None:
-        self.input_pdb = input_pdb
-        self.output_pdb = output_pdb
+    def __init__(self, input_file:Path, output_file:Path, transform_matrix:np.ndarray) -> None:
+        self.input_file = input_file
+        self.output_file = output_file
         self.transform_matrix = transform_matrix.astype(np.float64)
         assert transform_matrix.shape == (3, 4)
 
-        if input_pdb.suffix not in ('.pdb', '.cif'):
-            raise ValueError(f'Invalid file extension: {input_pdb.suffix}. Expected .pdb or .cif')
+        if input_file.suffix not in ('.pdb', '.cif'):
+            raise ValueError(f'Invalid file extension: {input_file.suffix}. Expected .pdb or .cif')
 
-        self.file_type = input_pdb.suffix
+        self.file_type = input_file.suffix
 
     def transform_coords(self) -> Path:
-        with (open(self.input_pdb, 'r', encoding='UTF8') as input_file,
-              open(self.output_pdb, 'w', encoding='UTF8') as output_file):
-            for line in input_file:
-                if line.startswith('ATOM  ') or line.startswith('HETATM'):
-                    model_parser = UpdateCoords(
-                        atom_line=line,
-                        file_format=self.file_type,
-                        rotation_matrix=self.transform_matrix[:,1:4].reshape((3,3)),
-                        translate_vector=self.transform_matrix[:,0].reshape((1,3)))
-                    output_file.write(model_parser.transform_line())
-            output_file.write('TER\nEND\n')
-        return self.output_pdb
-
-class UpdateCoords:
-    def __init__(self, atom_line:str, file_format:str,
-                 rotation_matrix:np.ndarray, translate_vector:np.ndarray) -> None:
-        self.atom_line = atom_line
-        self.file_format = file_format.lower()
-
-        assert rotation_matrix.shape == (3, 3)
-        self.rotation_matrix = rotation_matrix
-
-        assert translate_vector.shape == (1, 3)
-        self.translation_vector = translate_vector
-
-        match self.file_format:
-            case '.pdb':
-                # Legacy PDB format
-                self.group_pdb = atom_line[0:6]    # Record type
-                self.x = atom_line[30:38]      # X coordinate
-                self.y = atom_line[38:46]      # Y coordinate
-                self.z = atom_line[46:54]      # Z coordinate
-            case '.cif':
-                # mmCIF/PDBx files contain the same info as legacy PDB files
-                # but only care about the order of each piece of info, rather
-                # than the specific columns
-                self.line_contents = [t for t in atom_line.split() if t != '']
-                self.group_pdb = self.line_contents[0]       # _atom_site.group_PDB
-                self.x = self.line_contents[10]          # _atom_site.Cartn_x
-                self.y = self.line_contents[11]          # _atom_site.Cartn_y
-                self.z = self.line_contents[12]          # _atom_site.Cartn_z
-            case _:
-                raise ValueError(f'Invalid file format: {self.file_format}. Expected .pdb or .cif')
-
-    def _get_coords(self) -> np.ndarray:
-        return np.array([float(self.x), float(self.y), float(self.z)])
-
-    def _transform_coords(self) -> np.ndarray:
-        return np.dot(self.rotation_matrix, self._get_coords()) + self.translation_vector
-
-    def transform_line(self) -> str:
-        transformed_coords = self._transform_coords()
-        match self.file_format:
-            case '.pdb':
-                return self._pdb_format(transformed_coords)
-            case '.cif':
-                return self._cif_format(transformed_coords)
-            case _:
-                return ''
-
-    def _pdb_format(self, transformed_coords:np.ndarray) -> str:
-        return (
-            f'{self.atom_line[:30]}'
-            f'{transformed_coords[0][0]:8.3f}{transformed_coords[0][1]:8.3f}{transformed_coords[0][2]:8.3f}'
-            f'{self.atom_line[54:]}'
-        )
-
-    def _cif_format(self, transformed_coords:np.ndarray) -> str:
-        self.line_contents[10] = f'{transformed_coords[0][0]:8.3f}'
-        self.line_contents[11] = f'{transformed_coords[0][1]:8.3f}'
-        self.line_contents[12] = f'{transformed_coords[0][2]:8.3f}'
-        return '\t'.join(self.line_contents)
+        # Parse structure using BioPython
+        if self.file_type == '.pdb':
+            parser = PDBParser(QUIET=True)
+            io = PDBIO()
+        else:  # .cif
+            parser = MMCIFParser(QUIET=True)
+            io = MMCIFIO()
+        
+        structure = parser.get_structure('structure', self.input_file)
+        
+        # Transform coordinates
+        rotation_matrix = self.transform_matrix[:,1:4].reshape((3,3))
+        translation_vector = self.transform_matrix[:,0].reshape((1,3))
+        
+        for model in structure:
+            for chain in model:
+                for residue in chain:
+                    for atom in residue:
+                        coord = atom.get_coord()
+                        new_coord = np.dot(rotation_matrix, coord) + translation_vector.flatten()
+                        atom.set_coord(new_coord)
+        
+        # Write transformed structure
+        io.set_structure(structure)
+        io.save(str(self.output_file))
+        
+        return self.output_file
 
 class ColabAlign:
     def __init__(self, args) -> None:
@@ -225,15 +181,13 @@ class ColabAlign:
             self.usalign_path,
             self.models_path.joinpath(model1.name).as_posix(),
             self.models_path.joinpath(model2.name).as_posix(),
-            '-outfmt', '2', '-m', '-', '-fast'
+            '-outfmt', '2', '-m', '-'
         ]
         with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
             stdout, stderr = process.communicate()
         return model1, model2, stdout, stderr
 
     def _usalign_process(self, job):
-        # worker_id = getpid()  # Get the process ID to identify the worker
-        # print(f'Worker {worker_id} starting with {len(job)} pairs')
         results = []
         for pair in job:
             results.append(self._run_usalign(pair[0], pair[1]))
@@ -371,8 +325,6 @@ class ColabAlign:
                 # Append this process's results
                 process_results.append(process_hashmap)
 
-            total_bar.close()
-
         # Merge all results into a final dictionary
         usalign_results_map = {}
         for submap in process_results:
@@ -493,51 +445,58 @@ class ColabAlign:
 
                 if cluster_num == -1:
                     for model in model_list:
-                        copy(
-                            src=self.models_path.joinpath(f'{model}.pdb'),
-                            dst=cluster_output_dir.joinpath(f'{model}.pdb')
+                        # Find the original file with correct extension
+                        original_file = next(
+                            (f for f in self.model_list if f.stem == model), None
                         )
+                        if original_file:
+                            copy(
+                                src=self.models_path.joinpath(original_file.name),
+                                dst=cluster_output_dir.joinpath(original_file.name)
+                            )
                     continue
 
                 sub_matrix = self.tmmatrix.loc[list(model_list), list(model_list)]
-
                 reference_model_name = sub_matrix.max().idxmax()
-
-                with (open(self.models_path.joinpath(
-                    f'{reference_model_name}.pdb'),
-                    'r', encoding='UTF8') as input_ref,
-                      open(cluster_output_dir.joinpath(
-                          f'{reference_model_name}.pdb'),
-                          'w', encoding='UTF8'
-                      ) as output_ref):
-                    output_ref.write(
-                        'REMARK 900\n'
-                        'REMARK 900 RELATED ENTRIES\n'
-                        f'REMARK 900 REFERENCE MODEL FOR CLUSTER {cluster_num}\n'
+                
+                # Find reference model file with correct extension
+                ref_file = next(
+                    (f for f in self.model_list if f.stem == reference_model_name), None
+                )
+                
+                if ref_file:
+                    # Copy reference model
+                    copy(
+                        src=self.models_path.joinpath(ref_file.name),
+                        dst=cluster_output_dir.joinpath(ref_file.name)
                     )
-                    output_ref.write(input_ref.read())
 
-                cluster_df = self.usalign_df[
-                    (self.usalign_df['model1'] == reference_model_name) |
-                    (self.usalign_df['model2'] == reference_model_name)
-                ]
+                    cluster_df = self.usalign_df[
+                        (self.usalign_df['model1'] == reference_model_name) |
+                        (self.usalign_df['model2'] == reference_model_name)
+                    ]
 
-                for model in model_list:
-                    if model == reference_model_name:
-                        continue
+                    for model in model_list:
+                        if model == reference_model_name:
+                            continue
 
-                    mx = cluster_df.apply(
-                        self._find_matrix_in_array,
-                        axis=1,
-                        args=(model,)
-                    ).dropna().iloc[0]
+                        mx = cluster_df.apply(
+                            self._find_matrix_in_array,
+                            axis=1,
+                            args=(model,)
+                        ).dropna().iloc[0]
 
-                    if mx is not None:
-                        aligner = StructureAligner(
-                            input_pdb=self.models_path.joinpath(f'{model}.pdb'),
-                            output_pdb=cluster_output_dir.joinpath(f'{model}.pdb'),
-                            transform_matrix=mx)
-                        aligner.transform_coords()
+                        if mx is not None:
+                            # Find model file with correct extension
+                            model_file = next(
+                                (f for f in self.model_list if f.stem == model), None
+                            )
+                            if model_file:
+                                aligner = StructureAligner(
+                                    input_file=self.models_path.joinpath(model_file.name),
+                                    output_file=cluster_output_dir.joinpath(model_file.name),
+                                    transform_matrix=mx)
+                                aligner.transform_coords()
 
     # Scripts stored in mustang.py
     # Use MUSTANG and MView to find the sequences that most closely fits the consensus for the cluster
