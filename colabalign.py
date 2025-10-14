@@ -23,7 +23,7 @@ from mustang import GetRepresentatives
 
 def script_args():
     parser = ArgumentParser(
-        description='Script description goes here.'
+        description='Generate a dendrogram based on pairwise-structure alignments and select representative structures.'
         )
 
     # Required arguments
@@ -40,6 +40,13 @@ def script_args():
         type=Path,
         required=True,
         help='Path to output directory. Will be created if it does not exist.'
+    )
+
+    parser.add_argument(
+        '-b', '--beem',
+        type=Path,
+        required=True,
+        help='Path to BeEM executable.'
     )
 
     # Optional arguments
@@ -61,7 +68,7 @@ def script_args():
     )
 
     parser.add_argument(
-        '-p', '--path', 
+        '-u', '--usalign', 
         type=Path,
         required=False,
         default='USalign',
@@ -149,6 +156,7 @@ class ColabAlign:
                 'User-defined core count cannot be lower than 1. Core count set to default (1).'
             )
             self.cores = 1
+
         if self.cores > cpu_count():
             warnings.warn(
                 f'User-defined core count ({self.cores}) exceeds available cores ({cpu_count()}).'
@@ -156,9 +164,11 @@ class ColabAlign:
             )
             self.cores = cpu_count()
 
-        self.usalign_path = args.path
+        self.usalign_path = args.usalign
         self.tmmatrix = None
         self.usalign_df = None
+
+        self.beem_path = args.beem
 
     def _reverse_transformation_matrix(self, transform_mx_forward):
         assert isinstance(transform_mx_forward, np.ndarray)
@@ -237,31 +247,37 @@ class ColabAlign:
                 yield lst[int(last):int(last + avg)]
                 last += avg
 
-        print('Copying pdb files and converting .cif files to .pdb.')
-        updated_model_list = []
-        for model in self.model_list:
-            # Convert any .cif files to .pdb format for MUSTANG compatibility
-            if model.suffix == '.cif':
-                print(f'Converting {model} to PDB format.')
-                parser = MMCIFParser(QUIET=True)
-                structure = parser.get_structure(model.stem, model)
-                io = MMCIFIO()
-                io.set_structure(structure)
-                model = self.models_path.joinpath(f'{model.stem}.pdb')
-                io.save(model.as_posix())
-                updated_model_list.append(model.with_suffix('.pdb'))
+        def _run_beem(self, cif_file):
+            cmd = [
+                self.beem_path,
+                self.models_path.joinpath(cif_file).as_posix(),
+                '-outfmt=2',
+                f'-p={cif_file.stem}'
+            ]
+            with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+                stdout, stderr = process.communicate()
+            return model.with_suffix('.pdb'), stdout, stderr
 
+        print('Copying pdb files and converting .cif files to .pdb.')
+
+        for model in self.model_list:
+            # Convert any .cif files to .pdb format for MUSTANG compatibility.
+            # BeEM also splits multi-model .cif files into individual .pdb files with chain IDs appended to the end of the filename.
+            if model.suffix == '.cif':
+                _run_beem(self, model)
+                try:
+                    shutil.move(src=model.with_suffix('.pdb'), dst=self.models_path.joinpath(f'{model.stem}.pdb'))
+                except OSError as e:
+                    warnings.warn(f'Could not move {model.with_suffix(".pdb")} to {self.models_path.joinpath(f"{model.stem}.pdb")}: {e}')
             else:
-                print(f'Copying {model}.')
                 target = self.models_path.joinpath(f'{model.stem}.pdb')
                 if not target.exists() and model.is_file() and model.stat().st_size > 0:
                     try:
                         shutil.copy(src=model, dst=target)
-                        updated_model_list.append(target)
                     except OSError as e:
                         warnings.warn(f'Could not copy {model} to {target}: {e}')
 
-        self.model_list = updated_model_list
+        self.model_list = [f for f in self.models_path.glob('*.pdb') if f.is_file() and f.stat().st_size > 0]
 
         # Calculate all possible combinations of models, then create discrete lists of comparisons
         # on a per-model basis. This enables us to run multiple, concurrent US-align instances and
