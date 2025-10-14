@@ -16,7 +16,7 @@ import pandas as pd
 import numpy as np
 from Bio import Phylo
 from Bio.Phylo.TreeConstruction import DistanceTreeConstructor, DistanceMatrix
-from Bio.PDB import PDBParser, PDBIO
+from Bio.PDB import PDBParser, PDBIO, Select
 
 from mustang import GetRepresentatives
 
@@ -265,30 +265,45 @@ class ColabAlign:
         for model in self.model_list:
             # Convert any .cif files to .pdb format for MUSTANG compatibility.
             # BeEM also splits multi-model .cif files into individual .pdb files with chain IDs appended to the end of the filename.
-            # We delete files containing no protein residues here as US-align doesn't handle them.
+            # We achieve the same for native pdb files using biopython.
             if model.suffix == '.cif':
                 beem_output, _ = _run_beem(self, model)
                 beem_models = (item for item in beem_output.decode(errors='ignore').split('\n') if item != '')
                 for m in beem_models:
-                    file_contains_protein = False
-                    with open(m, 'r', encoding='utf-8') as f:
-                        for line in f:
-                            if line.startswith('ATOM') and line[17:20].strip() in aa_codes:
-                                file_contains_protein = True
-                                break
-
-                    if not file_contains_protein:
-                        print(f'Removing non-protein file: {m}')
-                        Path.unlink(self.beem_path.with_name(m))
-                    else:
-                        shutil.move(src=m, dst=self.models_path.joinpath(m))
+                    shutil.move(src=m, dst=self.models_path.joinpath(m))
 
             else:
-                target = self.models_path.joinpath(f'{model.stem}.pdb')
-                if not target.exists() and model.is_file() and model.stat().st_size > 0:
-                    shutil.copy(src=model, dst=target)
+                parser = PDBParser(QUIET=True)
+                io = PDBIO()
+                structure = parser.get_structure(model.stem, model)
 
-        self.model_list = sorted([f for f in self.models_path.glob('*.pdb') if f.is_file() and f.stat().st_size > 0])
+                for chain in structure.get_chains():
+                    chain_id = chain.get_id().upper()
+                    out_name = f'{structure.get_id()}{chain_id}.pdb'
+                    io.set_structure(chain)
+                    io.save((self.models_path.joinpath(out_name)).as_posix())
+
+        # Delete any files that are empty or do not contain protein residues as,
+        # US-align does not handle them properly.
+        for structure_file in self.models_path.glob('*.pdb'):
+            if not structure_file.stat().st_size > 0 or not structure_file.is_file():
+                print(f'Removing empty file: {structure_file}')
+                Path.unlink(structure_file)
+
+            with open(structure_file, 'r', encoding='utf-8') as f:
+                file_contains_protein = False
+                for line in f:
+                    if line.startswith('ATOM') and line[17:20].strip() in aa_codes:
+                        file_contains_protein = True
+                        break
+
+                if not file_contains_protein:
+                    print(f'Removing non-protein file: {structure_file}')
+                    Path.unlink(structure_file)
+                else:
+                    continue
+
+        self.model_list = sorted([f for f in self.models_path.glob('*.pdb')])
 
         # Calculate all possible combinations of models, then create discrete lists of comparisons
         # on a per-model basis. This enables us to run multiple, concurrent US-align instances and
