@@ -265,13 +265,10 @@ class ColabAlign:
             # BeEM also splits multi-model .cif files into individual .pdb files with chain IDs appended to the end of the filename.
             if model.suffix == '.cif':
                 beem_output, _ = _run_beem(self, model)
-                beem_models = beem_output.decode(errors='ignore').split('\n')
-
+                beem_models = (item for item in beem_output.decode(errors='ignore').split('\n') if item != '')
                 for m in beem_models:
-                    try:
-                        shutil.move(src=m, dst=self.models_path.joinpath(m))
-                    except OSError as e:
-                        warnings.warn(f'Could not move {m} to {self.models_path.joinpath(m)}: {e}')
+                    shutil.move(src=m, dst=self.models_path.joinpath(m))
+
             else:
                 target = self.models_path.joinpath(f'{model.stem}.pdb')
                 if not target.exists() and model.is_file() and model.stat().st_size > 0:
@@ -280,7 +277,7 @@ class ColabAlign:
                     except OSError as e:
                         warnings.warn(f'Could not copy {model} to {target}: {e}')
 
-        self.model_list = [f for f in self.models_path.glob('*.pdb') if f.is_file() and f.stat().st_size > 0]
+        self.model_list = sorted([f for f in self.models_path.glob('*.pdb') if f.is_file() and f.stat().st_size > 0])
 
         # Calculate all possible combinations of models, then create discrete lists of comparisons
         # on a per-model basis. This enables us to run multiple, concurrent US-align instances and
