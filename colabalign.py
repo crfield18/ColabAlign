@@ -16,9 +16,10 @@ import pandas as pd
 import numpy as np
 from Bio import Phylo
 from Bio.Phylo.TreeConstruction import DistanceTreeConstructor, DistanceMatrix
-from Bio.PDB import PDBParser, MMCIFParser, PDBIO, MMCIFIO
+from Bio.PDB import PDBParser, PDBIO
 
 from mustang import GetRepresentatives
+
 
 
 def script_args():
@@ -90,13 +91,8 @@ class StructureAligner:
         self.file_type = input_file.suffix
 
     def transform_coords(self) -> Path:
-        if self.file_type == '.pdb':
-            parser = PDBParser(QUIET=True)
-            io = PDBIO()
-        else:
-            parser = MMCIFParser(QUIET=True)
-            io = MMCIFIO()
-        
+        parser = PDBParser(QUIET=True)
+        io = PDBIO()
         structure = parser.get_structure('structure', self.input_file)
         
         # Transform coordinates
@@ -260,22 +256,36 @@ class ColabAlign:
 
         print('Copying pdb files and converting .cif files to .pdb.')
 
+        aa_codes = {
+            'CYS', 'ASP', 'SER', 'GLN', 'LYS', 'ILE', 'PRO', 'THR',
+            'PHE', 'ASN', 'GLY', 'HIS', 'LEU', 'ARG', 'TRP', 'ALA',
+            'VAL', 'GLU', 'TYR', 'MET'
+        }
+
         for model in self.model_list:
             # Convert any .cif files to .pdb format for MUSTANG compatibility.
             # BeEM also splits multi-model .cif files into individual .pdb files with chain IDs appended to the end of the filename.
+            # We delete files containing no protein residues here as US-align doesn't handle them.
             if model.suffix == '.cif':
                 beem_output, _ = _run_beem(self, model)
                 beem_models = (item for item in beem_output.decode(errors='ignore').split('\n') if item != '')
                 for m in beem_models:
+                    file_contains_protein = False
+                    with open(m, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            if line.startswith('ATOM') and line[17:20].strip() in aa_codes:
+                                file_contains_protein = True
+                                break
+
+                    if not file_contains_protein:
+                        print(f'Removing non-protein file: {m}')
+                        shutil.rmtree(m, ignore_errors=False)
                     shutil.move(src=m, dst=self.models_path.joinpath(m))
 
             else:
                 target = self.models_path.joinpath(f'{model.stem}.pdb')
                 if not target.exists() and model.is_file() and model.stat().st_size > 0:
-                    try:
-                        shutil.copy(src=model, dst=target)
-                    except OSError as e:
-                        warnings.warn(f'Could not copy {model} to {target}: {e}')
+                    shutil.copy(src=model, dst=target)
 
         self.model_list = sorted([f for f in self.models_path.glob('*.pdb') if f.is_file() and f.stat().st_size > 0])
 
