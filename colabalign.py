@@ -16,10 +16,9 @@ import pandas as pd
 import numpy as np
 from Bio import Phylo
 from Bio.Phylo.TreeConstruction import DistanceTreeConstructor, DistanceMatrix
-from Bio.PDB import PDBParser, PDBIO, Select
+from Bio.PDB import PDBParser, PDBIO
 
 from mustang import GetRepresentatives
-
 
 
 def script_args():
@@ -41,13 +40,6 @@ def script_args():
         type=Path,
         required=True,
         help='Path to output directory. Will be created if it does not exist.'
-    )
-
-    parser.add_argument(
-        '-b', '--beem',
-        type=Path,
-        required=True,
-        help='Path to BeEM executable.'
     )
 
     # Optional arguments
@@ -74,6 +66,15 @@ def script_args():
         required=False,
         default='USalign',
         help='Path to USalign executable. Not required if using conda install.'
+    )
+
+
+    parser.add_argument(
+        '-b', '--beem',
+        type=Path,
+        required=False,
+        default='BeEM',
+        help='Path to BeEM executable. Not required if using conda install or working exclusively with .pdb files.'
     )
 
     return parser.parse_args()
