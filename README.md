@@ -1,4 +1,4 @@
- # ColabAlign
+# ColabAlign
 
 ## Fast pairwise protein secondary structure comparisons using multiprocessing
 

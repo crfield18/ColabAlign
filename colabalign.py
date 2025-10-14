@@ -1,4 +1,3 @@
-import errno
 import subprocess
 import warnings
 from os import cpu_count
@@ -11,6 +10,7 @@ from shutil import copy
 from collections import defaultdict
 from time import time
 from tqdm.auto import tqdm as tqdm_auto
+import shutil
 
 import pandas as pd
 import numpy as np
@@ -19,6 +19,7 @@ from Bio.Phylo.TreeConstruction import DistanceTreeConstructor, DistanceMatrix
 from Bio.PDB import PDBParser, MMCIFParser, PDBIO, MMCIFIO
 
 from mustang import GetRepresentatives
+
 
 def script_args():
     parser = ArgumentParser(
@@ -236,17 +237,31 @@ class ColabAlign:
                 yield lst[int(last):int(last + avg)]
                 last += avg
 
-        print('Creating hardlinks for model files.')
+        print('Copying pdb files and converting .cif files to .pdb.')
+        updated_model_list = []
         for model in self.model_list:
-            link_path = self.models_path.joinpath(model.name)
-            # Have had issues with hardlinking across devices/file systems (particularly on HPC)
-            # so we default to symlinking if hardlinking (preferred) fails
-            if not link_path.exists():
-                try:
-                    link_path.hardlink_to(model.resolve())
-                except OSError as e:
-                    if e.errno == errno.EXDEV:  # Invalid cross-device link error
-                        link_path.symlink_to(model.resolve())
+            # Convert any .cif files to .pdb format for MUSTANG compatibility
+            if model.suffix == '.cif':
+                print(f'Converting {model} to PDB format.')
+                parser = MMCIFParser(QUIET=True)
+                structure = parser.get_structure(model.stem, model)
+                io = MMCIFIO()
+                io.set_structure(structure)
+                model = self.models_path.joinpath(f'{model.stem}.pdb')
+                io.save(model.as_posix())
+                updated_model_list.append(model.with_suffix('.pdb'))
+
+            else:
+                print(f'Copying {model}.')
+                target = self.models_path.joinpath(f'{model.stem}.pdb')
+                if not target.exists() and model.is_file() and model.stat().st_size > 0:
+                    try:
+                        shutil.copy(src=model, dst=target)
+                        updated_model_list.append(target)
+                    except OSError as e:
+                        warnings.warn(f'Could not copy {model} to {target}: {e}')
+
+        self.model_list = updated_model_list
 
         # Calculate all possible combinations of models, then create discrete lists of comparisons
         # on a per-model basis. This enables us to run multiple, concurrent US-align instances and
