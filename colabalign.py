@@ -256,7 +256,7 @@ class ColabAlign:
             ]
             with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
                 stdout, stderr = process.communicate()
-            return model.with_suffix('.pdb'), stdout, stderr
+            return stdout, stderr
 
         print('Copying pdb files and converting .cif files to .pdb.')
 
@@ -264,11 +264,14 @@ class ColabAlign:
             # Convert any .cif files to .pdb format for MUSTANG compatibility.
             # BeEM also splits multi-model .cif files into individual .pdb files with chain IDs appended to the end of the filename.
             if model.suffix == '.cif':
-                _run_beem(self, model)
-                try:
-                    shutil.move(src=model.with_suffix('.pdb'), dst=self.models_path.joinpath(f'{model.stem}.pdb'))
-                except OSError as e:
-                    warnings.warn(f'Could not move {model.with_suffix(".pdb")} to {self.models_path.joinpath(f"{model.stem}.pdb")}: {e}')
+                beem_output, _ = _run_beem(self, model)
+                beem_models = beem_output.decode(errors='ignore').split('\n')
+
+                for m in beem_models:
+                    try:
+                        shutil.move(src=m, dst=self.models_path.joinpath(m))
+                    except OSError as e:
+                        warnings.warn(f'Could not move {m} to {self.models_path.joinpath(m)}: {e}')
             else:
                 target = self.models_path.joinpath(f'{model.stem}.pdb')
                 if not target.exists() and model.is_file() and model.stat().st_size > 0:
