@@ -279,8 +279,9 @@ class ColabAlign:
 
                     if not file_contains_protein:
                         print(f'Removing non-protein file: {m}')
-                        shutil.rmtree(m, ignore_errors=False)
-                    shutil.move(src=m, dst=self.models_path.joinpath(m))
+                        Path.unlink(self.beem_path.with_name(m))
+                    else:
+                        shutil.move(src=m, dst=self.models_path.joinpath(m))
 
             else:
                 target = self.models_path.joinpath(f'{model.stem}.pdb')
@@ -296,7 +297,7 @@ class ColabAlign:
 
         # Run multiple US-align jobs in parallel
         # This greatly speeds up the workflow
-        print('Running US-align jobs.')
+        print(f'Running US-align jobs for {len(self.model_list)} models.')
         process_results = []  # Collect dictionaries from each future
 
         with ProcessPoolExecutor(max_workers=self.cores) as executor:
