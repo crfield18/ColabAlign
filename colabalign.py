@@ -104,10 +104,21 @@ class StructureAligner:
             for chain in model:
                 for residue in chain:
                     for atom in residue:
-                        coord = atom.get_coord()
-                        new_coord = np.dot(rotation_matrix, coord) + translation_vector.flatten()
-                        atom.set_coord(new_coord)
-        
+                        if atom.is_disordered():
+                            # Transform every alternate conformer individually
+                            for altloc in atom.disordered_get_id_list():
+                                child = atom.disordered_get(altloc)
+                                new_coord = (
+                                    np.dot(rotation_matrix, child.get_coord())
+                                    + translation_vector.flatten()
+                                )
+                                child.set_coord(new_coord)
+                        else:
+                            new_coord = (
+                                np.dot(rotation_matrix, atom.get_coord())
+                                + translation_vector.flatten()
+                            )
+                            atom.set_coord(new_coord)
         io.set_structure(structure)
         io.save(str(self.output_file))
         
