@@ -355,7 +355,7 @@ class ColabAlign:
 
         # Run multiple US-align jobs in parallel
         # This greatly speeds up the workflow
-        print(f'Running US-align jobs for {len(self.model_list)} models.')
+        print(f'Running US-align jobs for {len(self.model_list)} chains.')
         process_results = []  # Collect dictionaries from each future
 
         with ProcessPoolExecutor(max_workers=self.cores) as executor:
