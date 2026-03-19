@@ -32,6 +32,7 @@ def script_args():
         type=Path,
         required=True,
         nargs='+',
+        metavar='PATH',
         help='Path(s) to input files.'
     )
 
@@ -39,6 +40,7 @@ def script_args():
         '-o', '--output', 
         type=Path,
         required=True,
+        metavar='PATH',
         help='Path to output directory. Will be created if it does not exist.'
     )
 
@@ -48,6 +50,7 @@ def script_args():
         type=int,
         required=False,
         default=1,
+        metavar='INTEGER',
         help='Number of CPU cores to use (Default = 1).'
     )
 
@@ -57,7 +60,8 @@ def script_args():
         required=False,
         nargs='+',
         default=[0.25],
-        help='Set thresholds for clustering (Default = 0.25). Multiple values can be provided.'
+        metavar='FLOAT',
+        help='Set threshold(s) for clustering between 0.01 and 1.00 (Default = 0.25). Multiple values can be provided.'
     )
 
     parser.add_argument(
@@ -65,16 +69,28 @@ def script_args():
         type=Path,
         required=False,
         default='USalign',
+        metavar='PATH',
         help='Path to USalign executable. Not required if using conda install.'
     )
-
 
     parser.add_argument(
         '-b', '--beem',
         type=Path,
         required=False,
         default='BeEM',
+        metavar='PATH',
         help='Path to BeEM executable. Not required if using conda install or working exclusively with .pdb files.'
+    )
+
+    parser.add_argument(
+        '-m', '--mode',
+        type=str,
+        required=False,
+        default='all',
+        choices=['all', 'first'],
+        metavar='MODE',
+        help='''Choose whether to align all chains from input structures or only the first chain (typically chain A).
+        Valid arguments: %(choices)s'''
     )
 
     return parser.parse_args()
@@ -126,7 +142,6 @@ class StructureAligner:
 
 class ColabAlign:
     def __init__(self, args) -> None:
-
         self.model_list = []
         for user_input in args.input:
             if not user_input.is_file and not user_input.is_dir:
@@ -177,6 +192,7 @@ class ColabAlign:
         self.usalign_df = None
 
         self.beem_path = args.beem
+        self.mode = args.mode
 
     def _reverse_transformation_matrix(self, transform_mx_forward):
         assert isinstance(transform_mx_forward, np.ndarray)
@@ -274,6 +290,7 @@ class ColabAlign:
             'VAL', 'GLU', 'TYR', 'MET'
         }
 
+        original_stems = {m.stem for m in self.model_list}
         for model in self.model_list:
             # Convert any .cif files to .pdb format for MUSTANG compatibility.
             # BeEM also splits multi-model .cif files into individual .pdb files with chain IDs appended to the end of the filename.
@@ -295,7 +312,7 @@ class ColabAlign:
                     io.set_structure(chain)
                     io.save((self.models_path.joinpath(out_name)).as_posix())
 
-        # Delete any files that are empty or do not contain protein residues as,
+        # Delete any files that are empty or do not contain protein residues as
         # US-align does not handle them properly.
         for structure_file in self.models_path.glob('*.pdb'):
             if not structure_file.stat().st_size > 0 or not structure_file.is_file():
@@ -316,6 +333,20 @@ class ColabAlign:
                     continue
 
         self.model_list = sorted([f for f in self.models_path.glob('*.pdb')])
+
+        # Only take the first chain (alphabetically, most of the time it's chain A)
+        # if mode is set to first
+        if self.mode == 'first':
+            seen_inputs = set()
+            first_chains = []
+            for model in self.model_list:
+                input_stem = model.stem[:-1]
+                if input_stem in original_stems and input_stem not in seen_inputs:
+                    seen_inputs.add(input_stem)
+                    first_chains.append(model)
+                else:
+                    model.unlink()
+            self.model_list = first_chains
 
         # Calculate all possible combinations of models, then create discrete lists of comparisons
         # on a per-model basis. This enables us to run multiple, concurrent US-align instances and
