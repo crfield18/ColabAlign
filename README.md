@@ -6,7 +6,29 @@
 
 This notebook performs pairwise protein structural alignments using the [US-align](https://zhanggroup.org/US-align/) algorithm by [Zhang _et al._, (2022)](https://doi.org/10.1038/s41592-022-01585-1), then constructs a structure-informed dendrogram using the UPGMA algorithm to visualise similarities.
 
-Designed to run directly in Google Colab for ease-of-use and to remove any local hardware requirements. This implementation also includes multiprocessing support for dramatically increased performance over the base US-align program.
+ColabAlign is designed to run directly in Google Colab for ease-of-use and to remove any local hardware requirements. This implementation also includes multiprocessing support for dramatically increased performance over the base US-align program.
+
+---
+### Interpreting MView alignments
+
+MView uses an expanded character set to represent groups of amino acids with similar properties. Below is 
+Further information can be found at: <https://desmid.github.io/mview/manual/manual.html>
+
+ **Group** | **MView character** | **1 letter amino acid codes**             
+-------------------|------|---------------------------------------------------
+ **Alcohol**       | `o`  | `S, T`                                     
+ **Aliphatic**     | `l`  | `I, L, V`                                  
+ **Aromatic**      | `a`  | `F, H, W, Y`                               
+ **Charged**       | `c`  | `D, E, H, K, R`                            
+ **Hydrophobic**   | `h`  | `A, C, F, G, H, I, K, L, M, R, T, V, W, Y` 
+ **Negative**      | `-`  | `D, E`                                     
+ **Polar**         | `p`  | `C, D, E, H, K, N, Q, R, S, T`             
+ **Positive**      | `+`  | `H, K, R`                                  
+ **Small**         | `s`  | `A, C, D, G, N, P, S, T, V`                
+ **Tiny**          | `u`  | `A, G, S`                                  
+ **Turn-like**     | `t`  | `A, C, D, E, G, H, K, N, Q, R, S, T`       
+ **Stop**          | `*`  | `*`                                        
+
 
 ---
 
@@ -30,7 +52,7 @@ and an extra flag is needed that allows x86-only scripts:
 
 ---
 
-## References
+### References
 
 BibTeX-formatted references for this project and the associated references can be found in [colabalign.bib](colabalign.bib) and [associated-references.bib](associated-references.bib).
 
@@ -41,8 +63,9 @@ BibTeX-formatted references for this project and the associated references can b
 - **TreeCluster**: <https://doi.org/10.1371/journal.pone.0221068>
 - **MUSTANG**: <https://doi.org/10.1002/prot.20921>
 - **MView**: <https://doi.org/10.1093/bioinformatics/14.4.380>
+- **BeEM**: <https://doi.org/10.1186/s12859-023-05388-9>
 
 ---
 
-> [!IMPORTANT]
+> [!NOTE]
 > Permission to use, copy, modify, and distribute this program for any purpose, with or without fee, is hereby granted, provided that the notices on the head, the reference information, and this copyright notice appear in all copies or substantial portions of the Software. It is provided "as is" without express or implied warranty.
