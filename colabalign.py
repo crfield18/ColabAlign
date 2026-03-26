@@ -363,10 +363,10 @@ class ColabAlign:
             combos_list = list(all_combos)
 
             # Splitting the jobs into a lot of chunks to make the progess bar have any use at all
-            if len(combos_list) <= int(self.cores*50):
+            if len(combos_list) <= int(self.cores*500):
                 chunk_count = int(self.cores)
             else:
-                chunk_count = int(self.cores*50)
+                chunk_count = int(self.cores*500)
 
             jobs = list(_chunks(combos_list, chunk_count))
 
