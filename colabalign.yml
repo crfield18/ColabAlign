@@ -9,11 +9,9 @@ dependencies:
   - numpy
   - pandas
   - biopython
-  - bs4
+  - scipy
   - tqdm
 # Bioinformatics tools
   - treecluster
   - usalign
-  - mustang
-  - mview
   - beem-bio
