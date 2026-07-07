@@ -12,19 +12,12 @@ import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm as tqdm_auto
 
+from common import chunks
+
 DO_PATTERN = re.compile(
     r'^\s*CA\s+\w{3}\s+\S+\s+\d+\s+CA\s+\w{3}\s+\S+\s+\d+\s+([\d.]+)\s*$'
 )
 VALID_ALN_CHARS = set('ABCDEFGHIKLMNPQRSTVWYXZUO-')
-
-
-def _chunks(lst, n):
-    '''Yield n chunks from the list.'''
-    avg = len(lst) / n
-    last = 0
-    while last < len(lst):
-        yield lst[int(last):int(last + avg)]
-        last += avg
 
 
 def reverse_transformation_matrix(transform_mx_forward: np.ndarray) -> np.ndarray:
@@ -258,7 +251,7 @@ def run_pairwise_alignments(model_list, models_path, usalign_path, cores, cache_
     print(f'Running US-align jobs for {len(model_list)} chains.')
 
     chunk_count = int(cores) if len(all_combos) <= int(cores * 5000) else int(cores * 5000)
-    jobs = list(_chunks(all_combos, chunk_count))
+    jobs = list(chunks(all_combos, chunk_count))
 
     total_bar = tqdm_auto(total=len(all_combos), desc='Total alignments',
                            unit=' alignment', dynamic_ncols=True, leave=True)

@@ -3,10 +3,12 @@
 import shutil
 import subprocess
 from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from Bio.PDB import PDBParser, PDBIO
+from tqdm.auto import tqdm as tqdm_auto
 
-from common import file_contains_protein
+from common import file_contains_protein, chunks
 
 
 def discover_input_models(input_paths):
@@ -83,7 +85,71 @@ def split_chains_to_pdb(models_path: Path, model: Path):
         tmp_path.rename(final_path)
 
 
-def prepare_models(model_list, models_path: Path, beem_path: Path, mode: str):
+def _prepare_one_model(beem_path: Path, models_path: Path, model: Path):
+    '''
+    Convert/copy a single input model into single-chain PDB file(s) under
+    models_path. Runs inside a worker process.
+    Never raises - returns (model_stem, error_or_None) so that one bad
+    input can't take down the rest of its chunk.
+    '''
+    try:
+        if model.suffix == '.cif':
+            stdout, stderr = _run_beem(beem_path, models_path, model)
+            beem_models = [item for item in stdout.decode(errors='ignore').split('\n') if item]
+            if not beem_models:
+                return model.stem, f'BeEM produced no output (stderr: {stderr.decode(errors="ignore")})'
+            for m in beem_models:
+                _safe_move(Path(m), models_path.joinpath(Path(m).name))
+        else:
+            split_chains_to_pdb(models_path, model)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # any failure (subprocess, parsing, etc.) is reported as a failed
+        # model rather than crashing the whole chunk
+        return model.stem, f'{type(e).__name__}: {e}'
+    return model.stem, None
+
+
+def _prepare_job(beem_path: Path, models_path: Path, models_chunk):
+    '''Prepare every model in a chunk, sequentially, within one worker process.'''
+    return [_prepare_one_model(beem_path, models_path, model) for model in models_chunk]
+
+
+def _copy_and_convert_models(model_list, models_path: Path, beem_path: Path, cores: int):
+    '''
+    Get the full list of input models up front, split it into per-core
+    chunks, and run BeEM conversion / chain splitting for each chunk in
+    a separate worker process.
+    '''
+    chunk_count = min(int(cores), len(model_list)) or 1
+    jobs = list(chunks(model_list, chunk_count))
+
+    total_bar = tqdm_auto(total=len(model_list), desc='Preparing structures',
+                           unit=' structure', dynamic_ncols=True, leave=True)
+
+    failed = []
+    with ProcessPoolExecutor(max_workers=cores) as executor:
+        futures = [executor.submit(_prepare_job, beem_path, models_path, job) for job in jobs]
+
+        for future in as_completed(futures):
+            try:
+                results = future.result()
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # one lost chunk shouldn't abort collection of the rest
+                print(f'Chunk-level error (entire chunk lost): {e}')
+                continue
+
+            for model_stem, error in results:
+                total_bar.update(1)
+                if error is not None:
+                    failed.append((model_stem, error))
+
+    if failed:
+        print(f'\n{len(failed)} input structure(s) failed during preparation and were skipped:')
+        for stem, err in failed:
+            print(f'  {stem}: {err}')
+
+
+def prepare_models(model_list, models_path: Path, beem_path: Path, mode: str, cores: int = 1):
     '''
     Copy/convert input structures into single-chain PDB files under models_path.
     Returns the final, filtered list of PDB files to align.
@@ -91,14 +157,7 @@ def prepare_models(model_list, models_path: Path, beem_path: Path, mode: str):
     print('Copying pdb files and converting .cif files to .pdb.')
     original_stems = {m.stem for m in model_list}
 
-    for model in model_list:
-        if model.suffix == '.cif':
-            stdout, _ = _run_beem(beem_path, models_path, model)
-            beem_models = (item for item in stdout.decode(errors='ignore').split('\n') if item)
-            for m in beem_models:
-                _safe_move(Path(m), models_path.joinpath(Path(m).name))
-        else:
-            split_chains_to_pdb(models_path, model)
+    _copy_and_convert_models(model_list, models_path, beem_path, cores)
 
     # Drop empty or non-protein files - US-align does not handle them properly.
     for structure_file in models_path.glob('*.pdb'):

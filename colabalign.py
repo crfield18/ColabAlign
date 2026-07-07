@@ -57,7 +57,7 @@ class ColabAlign:
     def prepare_structures(self):
         '''Prepare input models (e.g. chain extraction, format conversion) for alignment.'''
         self.model_list = prepare_models(
-            self.model_list, self.models_path, self.beem_path, self.mode
+            self.model_list, self.models_path, self.beem_path, self.mode, self.cores
             )
 
     def pairwise_alignment(self):

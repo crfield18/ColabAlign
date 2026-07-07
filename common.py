@@ -19,6 +19,15 @@ THREE_TO_ONE = {
     'MSE': 'M',
 }
 
+def chunks(lst, n):
+    '''Yield n roughly-equal chunks from the list, for distributing work
+    across a fixed number of worker processes.'''
+    avg = len(lst) / n
+    last = 0
+    while last < len(lst):
+        yield lst[int(last):int(last + avg)]
+        last += avg
+
 
 def file_contains_protein(pdb_path):
     '''Check both ATOM and HETATM lines, since USalign-alignable modified
