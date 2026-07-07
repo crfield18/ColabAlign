@@ -250,7 +250,12 @@ def run_pairwise_alignments(model_list, models_path, usalign_path, cores, cache_
     all_combos = list(combinations(model_list, 2))
     print(f'Running US-align jobs for {len(model_list)} chains.')
 
-    chunk_count = int(cores) if len(all_combos) <= int(cores * 5000) else int(cores * 5000)
+    batch_size = 500
+    chunk_count = max(int(cores), min(len(all_combos) // batch_size, len(all_combos)))
+    if chunk_count == 0:
+        chunk_count = 1
+
+    print(f'chunk count: {chunk_count}')
     jobs = list(chunks(all_combos, chunk_count))
 
     total_bar = tqdm_auto(total=len(all_combos), desc='Total alignments',
