@@ -9,7 +9,7 @@ This notebook performs pairwise protein structural alignments using the [US-alig
 ColabAlign is designed to run directly in Google Colab for ease-of-use and to remove any local hardware requirements. This implementation also includes multiprocessing support for dramatically increased performance over the base US-align program.
 
 ---
-### Interpreting MView alignments
+### Interpreting MView-like alignments
 
 MView uses an expanded character set to represent groups of amino acids with similar properties. Below is 
 Further information can be found at: <https://desmid.github.io/mview/manual/manual.html>
@@ -36,19 +36,23 @@ Further information can be found at: <https://desmid.github.io/mview/manual/manu
 
 ColabAlign.py is designed to work for Google Colab and running on local machines. A [YAML file](colabalign.yml) is provided for easy installation of dependencies in a Conda environment.
 
-**On Linux (distro-dependent) and x86 Macs (i.e. pre-M1)**, simply create an environment with:
+**For a Conda virtual environment install**, simply create an environment with:
 
 `conda env create -f colabalign.yml`
 
-**On ARM-based Macs (M1 onwards)**
+**Using PIP instead?** Since most of the depencencies are Python-based, they can be installed directly:
 
-Rosetta 2 is required:
+`pip install numpy pandas biopython scipy tqdm`
 
-`softwareupdate --install-rosetta`
+The remaining tools, `USalign` and `BEeM`, need to be compiled from source. Please see their respective GitHub repos for more information (<https://github.com/pylelab/USalign> and <https://github.com/kad-ecoli/BeEM/>).
 
-and an extra flag is needed that allows x86-only scripts:
+You can point ColabAlign at the USalign and BEeM binaries by including these flags:
 
-`conda env create --platform osx-64 -f colabalign.yml`
+`-b /path/to/BEeM` or `--beem /path/to/BEeM`
+
+and 
+
+`-u /path/to/USalign` or `--usalign /path/to/USalign`
 
 ---
 

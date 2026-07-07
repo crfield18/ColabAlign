@@ -1,199 +1,63 @@
-import subprocess
-import warnings
+'''Top-level driver for structure alignment, clustering, and consensus selection.'''
+
 from os import cpu_count
+import warnings
 from pathlib import Path
-from argparse import ArgumentParser
-from math import isnan
-from itertools import combinations
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from shutil import copy
-from collections import defaultdict
 from time import time
-from tqdm.auto import tqdm as tqdm_auto
-import shutil
 
-import pandas as pd
-import numpy as np
-from Bio import Phylo
-from Bio.Phylo.TreeConstruction import DistanceTreeConstructor, DistanceMatrix
-from Bio.PDB import PDBParser, PDBIO
+from cli import script_args
+from structure_prep import discover_input_models, prepare_models
+from usalign_runner import run_pairwise_alignments, check_tm_matrix_completeness
+from dendrogram import grow_tree as _grow_tree, tree_clustering as _tree_clustering
+from consensus import ClusterConsensus
 
-from mustang import GetRepresentatives
-
-
-def script_args():
-    parser = ArgumentParser(
-        description='Generate a dendrogram based on pairwise-structure alignments and select representative structures.'
-        )
-
-    # Required arguments
-    parser.add_argument(
-        '-i', '--input', 
-        type=Path,
-        required=True,
-        nargs='+',
-        metavar='PATH',
-        help='Path(s) to input files.'
-    )
-
-    parser.add_argument(
-        '-o', '--output', 
-        type=Path,
-        required=True,
-        metavar='PATH',
-        help='Path to output directory. Will be created if it does not exist.'
-    )
-
-    # Optional arguments
-    parser.add_argument(
-        '-c', '--cores', 
-        type=int,
-        required=False,
-        default=1,
-        metavar='INTEGER',
-        help='Number of CPU cores to use (Default = 1).'
-    )
-
-    parser.add_argument(
-        '-t', '--threshold', 
-        type=float,
-        required=False,
-        nargs='+',
-        default=[0.25],
-        metavar='FLOAT',
-        help='Set threshold(s) for clustering between 0.01 and 1.00 (Default = 0.25). Multiple values can be provided.'
-    )
-
-    parser.add_argument(
-        '-u', '--usalign', 
-        type=Path,
-        required=False,
-        default='USalign',
-        metavar='PATH',
-        help='Path to USalign executable. Not required if using conda install.'
-    )
-
-    parser.add_argument(
-        '-b', '--beem',
-        type=Path,
-        required=False,
-        default='BeEM',
-        metavar='PATH',
-        help='Path to BeEM executable. Not required if using conda install or working exclusively with .pdb files.'
-    )
-
-    parser.add_argument(
-        '-m', '--mode',
-        type=str,
-        required=False,
-        default='all',
-        choices=['all', 'first'],
-        metavar='MODE',
-        help='''Choose whether to align all chains from input structures or only the first chain (typically chain A).
-        Valid arguments: %(choices)s'''
-    )
-
-    return parser.parse_args()
-
-class StructureAligner:
-    def __init__(self, input_file:Path, output_file:Path, transform_matrix:np.ndarray) -> None:
-        self.input_file = input_file
-        self.output_file = output_file
-        self.transform_matrix = transform_matrix.astype(np.float64)
-        assert transform_matrix.shape == (3, 4)
-
-        if input_file.suffix not in ('.pdb', '.cif'):
-            raise ValueError(f'Invalid file extension: {input_file.suffix}. Expected .pdb or .cif')
-
-        self.file_type = input_file.suffix
-
-    def transform_coords(self) -> Path:
-        parser = PDBParser(QUIET=True)
-        io = PDBIO()
-        structure = parser.get_structure('structure', self.input_file)
-        
-        # Transform coordinates
-        rotation_matrix = self.transform_matrix[:,1:4].reshape((3,3))
-        translation_vector = self.transform_matrix[:,0].reshape((1,3))
-        
-        for model in structure:
-            for chain in model:
-                for residue in chain:
-                    for atom in residue:
-                        if atom.is_disordered():
-                            # Transform every alternate conformer individually
-                            for altloc in atom.disordered_get_id_list():
-                                child = atom.disordered_get(altloc)
-                                new_coord = (
-                                    np.dot(rotation_matrix, child.get_coord())
-                                    + translation_vector.flatten()
-                                )
-                                child.set_coord(new_coord)
-                        else:
-                            new_coord = (
-                                np.dot(rotation_matrix, atom.get_coord())
-                                + translation_vector.flatten()
-                            )
-                            atom.set_coord(new_coord)
-        io.set_structure(structure)
-        io.save(str(self.output_file))
-        
-        return self.output_file
 
 class ColabAlign:
-    def __init__(self, args) -> None:
-        self.model_list = []
-        for user_input in args.input:
-            if not user_input.is_file and not user_input.is_dir:
-                continue
-            if user_input.is_file and user_input.suffix in ('.pdb', '.cif'):
-                self.model_list.append(user_input)
-            elif user_input.is_dir():
-                self.model_list.extend(
-                    file for file in user_input.iterdir() if file.is_file()
-                    and file.suffix in ('.pdb', '.cif')
-                )
-        self.model_list = sorted(self.model_list)
+    '''Coordinates structure prep, pairwise alignment, clustering, and consensus selection.'''
 
-        # Handle user-defined clustering threshold
+    def __init__(self, args) -> None:
+        '''Initialize output directories and runtime parameters from parsed CLI args.'''
+        self.model_list = discover_input_models(args.input)
         self.thresholds = args.threshold
 
-        # Handle input and output paths and create necessary directories
         print('Setting up file structure.')
         self.home_path = args.output
         self.models_path = self.home_path.joinpath('models')
         self.results_path = self.home_path.joinpath('results')
 
         for output_subdir in (
-            self.home_path,
-            self.models_path,
-            self.results_path,
+            self.home_path, self.models_path, self.results_path,
             self.results_path.joinpath('clusters'),
         ):
             Path.mkdir(output_subdir, exist_ok=True, parents=True)
 
-        # Handle user-defined core count
         self.cores = args.cores
         if self.cores <= 0:
             warnings.warn(
-                'User-defined core count cannot be lower than 1. Core count set to default (1).'
+                'User-defined core count cannot be lower than 1. '
+                'Core count set to default (1).'
             )
             self.cores = 1
-
         if self.cores > cpu_count():
             warnings.warn(
-                f'User-defined core count ({self.cores}) exceeds available cores ({cpu_count()}).'
-                'Using maximum available cores instead.'
+                f'User-defined core count ({self.cores}) exceeds available cores '
+                f'({cpu_count()}). Using maximum available cores instead.'
             )
             self.cores = cpu_count()
 
         self.usalign_path = args.usalign
-        self.tmmatrix = None
-        self.usalign_df = None
-
         self.beem_path = args.beem
         self.mode = args.mode
 
+        self.tmmatrix = None
+        self.library = None
+        self.transforms = None
+        self.clusters_by_threshold = None
+
+    def prepare_structures(self):
+        '''Prepare input models (e.g. chain extraction, format conversion) for alignment.'''
+        self.model_list = prepare_models(
+            self.model_list, self.models_path, self.beem_path, self.mode, self.cores
     def _reverse_transformation_matrix(self, transform_mx_forward):
         assert isinstance(transform_mx_forward, np.ndarray)
         assert transform_mx_forward.shape == (3, 4)
@@ -378,235 +242,54 @@ class ColabAlign:
                 leave=True,
             )
 
-            # Submit jobs and attach callbacks to update the total bar
-            futures = []
-            for job in jobs:
-                fut = executor.submit(self._usalign_process, job)
-
-                def _callback(f):
-                    try:
-                        res = f.result()
-                        n = len(res)
-                    except Exception:
-                        n = 0
-                    total_bar.update(n)
-
-                fut.add_done_callback(_callback)
-                futures.append(fut)
-
-            for future in as_completed(futures):
-                try:
-                    # Default dict set up to make a new empty subdict if the key does not exist
-                    process_hashmap = defaultdict(lambda: defaultdict(dict))
-
-                    for result in future.result():
-                        model1, model2, stdout, stderr = result
-
-                        # Parse the stdout from USalign
-                        parsed_results = self._parse_usalign_stdout(stdout)
-                        tm_1, tm_2, transform_mx_forward, transform_mx_reverse = parsed_results
-
-                        # Update the hashmap with results
-                        process_hashmap.setdefault(model1.stem, {})[model2.stem] = {
-                            'tm_forward': tm_1,
-                            'transform_mx_forward': transform_mx_forward,
-                            'tm_reverse': tm_2,
-                            'transform_mx_reverse': transform_mx_reverse
-                        }
-
-                        # Handle any errors in stderr
-                        if stderr != b'' or stdout == b'':
-                            print(f'Error for models {model1, model2}: {stderr.decode(errors="ignore")}')
-
-                except Exception as e:
-                    print(f'Error occurred: {e}')
-
-                process_results.append(process_hashmap)
-
-        # Merge all results into a final dictionary
-        usalign_results_map = {}
-        for submap in process_results:
-            for model1, subsubmap in submap.items():
-                usalign_results_map.setdefault(model1, {}).update(subsubmap)
-
-        # Export this to file?
-        self.usalign_df = self._results_map_to_df(usalign_results_map)
-
-        # Initialise a matrix with NaN values to be populated with US-align values
-        # Probably not the most memory/time efficient method for this but I found it much easier
-        # to understand how the data is handled.
-        matrix_data = np.full((len(self.model_list), len(self.model_list)), np.nan)
-
-        # Create a dictionary to map model names to indices
-        model_index = {model.stem: idx for idx, model in enumerate(self.model_list)}
-
-        # Populate the matrix with the highest US-align score for each pair
-        # Chain identifiers are added after each .pdb or .cif but the first
-        # chain in the file is the only one included in the alignment.
-        # These identifiers are removed here to save confusion.
-        for _, row in self.usalign_df.iterrows():
-            if row['model1'].startswith('model1'):
-                continue
-
-            max_tm = max(row['tm_forward'], row['tm_reverse'])
-
-            i, j = model_index[row['model1']], model_index[row['model2']]
-            matrix_data[i, j] = max_tm
-            matrix_data[j, i] = max_tm
-
-        # Fill the diagonal with scores of 1
-        # We don't need to align a model to itself because this will always return a TM-score of 1
-        # Calculated US-align scores are given to 4 decimal places
-        np.fill_diagonal(matrix_data, 1.0000)
-
-        self.tmmatrix = pd.DataFrame(
-            matrix_data,
-            index=[model.stem for model in self.model_list],
-            columns=[model.stem for model in self.model_list]
+    def pairwise_alignment(self):
+        '''Run all-vs-all USalign alignments and write the resulting TM-score matrix.'''
+        cache_dir = self.results_path.joinpath('usalign_cache')
+        self.tmmatrix, self.library, self.transforms, failed_pairs = run_pairwise_alignments(
+            self.model_list, self.models_path, self.usalign_path, self.cores, cache_dir
         )
         self.tmmatrix.to_csv(self.results_path.joinpath('us-align_score_matrix.csv'), index=True)
 
+        missing = check_tm_matrix_completeness(self.tmmatrix)
+        if missing:
+            total_pairs = len(self.model_list) * (len(self.model_list) - 1) // 2
+            print(
+                f'\nWARNING: {len(missing)} of {total_pairs} pairs are missing from the '
+                f'TM-score matrix (see failed-pair list above). The dendrogram and '
+                f'clustering below will proceed, but any structures only connected '
+                f'through a missing pair may cluster unexpectedly.'
+            )
+
     def grow_tree(self):
-        print('Generating structural dendrogram.')
-        # Invert US-align scores to make them suitable for distances on a structural dendrogram.
-        # More similar pairs of models (i.e., higher TM-scores) have shorter distances to each
-        # other.
-
-        # Distance values are all rounded to 4 decimal places since all US-align scores are
-        # also rounded to 4 d.p. Clipping is also applied to ensure no values below 0 or above 1
-        # are present in the distance matrix.
-
-        distances_df = 1.0000 - self.tmmatrix
-        distances_df = distances_df.round(4)
-        distances_df = distances_df.clip(lower=0.0000, upper=1.0000)
-
-        # Convert the scores matrix to a lower triangle matrix
-        # The lower and upper triangles of the matrix are identical and Bio.Phylo.TreeConstruction
-        # requires a lower triangle matrix rather than the full matrix
-        lower_tri_df = distances_df.where(np.tril(np.ones(distances_df.shape)).astype(bool))
-        lower_tri_lists = [[value for value in row if not isnan(value)]
-                           for row in lower_tri_df.values.tolist()]
-
-        # Generate structural dendrogram using the UPGMA clustering method
-        # We can safely ignore the Molecular Clock hypothesis because we are not
-        # deriving evolutionary relationships between proteins
-        tm_matrix = DistanceMatrix(
-            names=[model.stem for model in self.model_list],
-            matrix=lower_tri_lists
-        )
-        constructor = DistanceTreeConstructor()
-        tree = constructor.upgma(tm_matrix)
-
-        # Draw the tree in ASCII for quick validation
-        # print('\n')
-        # Phylo.draw_ascii(tree)
-        Phylo.write(tree, self.results_path.joinpath('colabalign.tree'), 'newick')
+        '''Build and save the dendrogram from the TM-score matrix.'''
+        _grow_tree(self.tmmatrix, self.model_list, self.results_path)
 
     def tree_clustering(self):
-        print('Calculating clusters from structural tree.')
+        '''Cluster the dendrogram at each configured threshold.'''
+        self.clusters_by_threshold = _tree_clustering(
+            self.thresholds, self.results_path, self.tmmatrix,
+            self.transforms, self.model_list, self.models_path
+        )
 
-        completed_processes = []
-
-        for thresh in self.thresholds:
-            cmd = [
-                'TreeCluster.py',
-                '-i', self.results_path.joinpath('colabalign.tree').as_posix(),
-                '-o', self.results_path.joinpath(f'clusters/{thresh:.2f}.tsv').as_posix(),
-                '-t', f'{thresh:.2f}'
-            ]
-            with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
-                _, _ = process.communicate()
-                completed_processes.append(process)
-
-        for process in completed_processes:
-            process.wait()
-
-        for thresh in self.thresholds:
-            self.clusters = {}
-            with open(
-                self.results_path.joinpath(f'clusters/{thresh:.2f}.tsv'),
-                'r', encoding='UTF8') as cluster_file:
-                for line in cluster_file:
-                    if line.startswith('SequenceName'):
-                        continue
-                    line_split = line.split('\t')
-                    cluster_num = int(line_split[1].strip('\n'))
-                    if cluster_num not in self.clusters:
-                        self.clusters[cluster_num] = []
-                    self.clusters[cluster_num].append(line_split[0].strip())
-
-            for cluster_num, model_list in self.clusters.items():
-                cluster_output_dir = self.results_path.joinpath(
-                    f'clusters/{thresh:.2f}/{cluster_num}'
-                    )
-                Path.mkdir(cluster_output_dir, exist_ok=True, parents=True)
-
-                if cluster_num == -1:
-                    for model in model_list:
-                        # Find the original file with correct extension
-                        original_file = next(
-                            (f for f in self.model_list if f.stem == model), None
-                        )
-                        if original_file:
-                            copy(
-                                src=self.models_path.joinpath(original_file.name),
-                                dst=cluster_output_dir.joinpath(original_file.name)
-                            )
-                    continue
-
-                sub_matrix = self.tmmatrix.loc[list(model_list), list(model_list)]
-                reference_model_name = sub_matrix.max().idxmax()
-                
-                # Find reference model file with correct extension
-                ref_file = next(
-                    (f for f in self.model_list if f.stem == reference_model_name), None
-                )
-                
-                if ref_file:
-                    # Copy reference model
-                    copy(
-                        src=self.models_path.joinpath(ref_file.name),
-                        dst=cluster_output_dir.joinpath(ref_file.name)
-                    )
-
-                    cluster_df = self.usalign_df[
-                        (self.usalign_df['model1'] == reference_model_name) |
-                        (self.usalign_df['model2'] == reference_model_name)
-                    ]
-
-                    for model in model_list:
-                        if model == reference_model_name:
-                            continue
-
-                        mx = cluster_df.apply(
-                            self._find_matrix_in_array,
-                            axis=1,
-                            args=(model,)
-                        ).dropna().iloc[0]
-
-                        if mx is not None:
-                            # Find model file with correct extension
-                            model_file = next(
-                                (f for f in self.model_list if f.stem == model), None
-                            )
-                            if model_file:
-                                aligner = StructureAligner(
-                                    input_file=self.models_path.joinpath(model_file.name),
-                                    output_file=cluster_output_dir.joinpath(model_file.name),
-                                    transform_matrix=mx)
-                                aligner.transform_coords()
-
-    # Scripts stored in mustang.py
-    # Use MUSTANG and MView to find the sequences that most closely fits the consensus for the cluster
     def find_representatives(self):
-        sorted_clusters = lambda x: sorted(self.clusters.items(), key=lambda x: len(x[1]), reverse=True)
-        reps_parser = GetRepresentatives(clusters=sorted_clusters(self.clusters), threads=self.cores)
-        reps_parser.get_representatives(self.results_path)
+        '''Select and write representative structures for each cluster at each threshold.'''
+        reps_parser = ClusterConsensus(
+            library=self.library, tmmatrix=self.tmmatrix, threads=self.cores
+        )
+        reps_parser.get_representatives_all_thresholds(
+            self.results_path, self.clusters_by_threshold
+            )
+
 
 def main():
+    '''Run the full ColabAlign pipeline end-to-end and report timing for each stage.'''
     main_time_start = time()
-
     local_instance = ColabAlign(script_args())
+
+    prep_time_start = time()
+    print('Preparing input structures.')
+    local_instance.prepare_structures()
+    print(f'Structure preparation elapsed time:\t{time() - prep_time_start:.2f} s')
 
     align_time_start = time()
     print('Starting pairwise alignment.')
@@ -627,8 +310,9 @@ def main():
     print('Finding cluster representatives.')
     local_instance.find_representatives()
     print(f'Representative calculation elapsed time:\t{time() - reps_time_start:.2f} s')
- 
+
     print(f'Total elapsed time:\t{time() - main_time_start:.2f} s')
+
 
 if __name__ == '__main__':
     main()
