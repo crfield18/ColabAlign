@@ -57,7 +57,7 @@ class ColabAlign:
     def prepare_structures(self):
         '''Prepare input models (e.g. chain extraction, format conversion) for alignment.'''
         self.model_list = prepare_models(
-            self.model_list, self.models_path, self.beem_path, self.mode, self.cores
+            self.model_list, self.models_path, self.beem_path, self.mode, self.cores)
     def _reverse_transformation_matrix(self, transform_mx_forward):
         assert isinstance(transform_mx_forward, np.ndarray)
         assert transform_mx_forward.shape == (3, 4)
