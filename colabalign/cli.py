@@ -1,16 +1,24 @@
-'''Command-line argument parsing for the dendrogram generation script.'''
+'''Command-line argument parsing for the colabalign command.'''
 
 from argparse import ArgumentParser
 from pathlib import Path
 
+from . import __version__
 
-def script_args():
-    '''Parse and return command-line arguments for the script.'''
+
+def build_parser() -> ArgumentParser:
+    '''Build the argument parser (separate from parsing, for testing and docs).'''
     parser = ArgumentParser(
+        prog='colabalign',
         description=(
             'Generate a dendrogram based on pairwise-structure alignments '
             'and select representative structures.'
         )
+    )
+    parser.add_argument(
+        '-V', '--version',
+        action='version',
+        version=f'%(prog)s {__version__}',
     )
     parser.add_argument(
         '-i', '--input',
@@ -18,7 +26,7 @@ def script_args():
         required=True,
         nargs='+',
         metavar='PATH',
-        help='Path(s) to input files.'
+        help='Path(s) to input .pdb/.cif files, directories of them, or .zip archives.'
     )
     parser.add_argument(
         '-o', '--output',
@@ -77,4 +85,9 @@ def script_args():
         only the first chain (typically chain A). Valid arguments: %(choices)s'''
     )
 
-    return parser.parse_args()
+    return parser
+
+
+def script_args(argv=None):
+    '''Parse command-line arguments. argv defaults to sys.argv[1:].'''
+    return build_parser().parse_args(argv)

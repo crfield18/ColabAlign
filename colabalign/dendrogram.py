@@ -11,7 +11,6 @@ from Bio import Phylo
 from Bio.Phylo.TreeConstruction import DistanceTreeConstructor, DistanceMatrix
 from Bio.PDB import PDBParser, PDBIO
 
-from usalign_runner import get_transform_matrix
 
 
 class StructureAligner:  # pylint: disable=too-few-public-methods
@@ -84,8 +83,7 @@ def grow_tree(tmmatrix: pd.DataFrame, model_list, results_path: Path):
 
 
 def _run_treecluster(thresholds, results_path: Path):
-    '''Run TreeCluster.py for each threshold, in parallel, and wait for completion.'''
-    completed_processes = []
+    '''Run TreeCluster.py once per threshold, raising if any run fails.'''
     for thresh in thresholds:
         cmd = [
             'TreeCluster.py',
@@ -93,11 +91,12 @@ def _run_treecluster(thresholds, results_path: Path):
             '-o', results_path.joinpath(f'clusters/{thresh:.2f}.tsv').as_posix(),
             '-t', f'{thresh:.2f}'
         ]
-        with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
-            process.communicate()
-            completed_processes.append(process)
-    for process in completed_processes:
-        process.wait()
+        result = subprocess.run(cmd, capture_output=True, check=False)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f'TreeCluster.py failed for threshold {thresh:.2f} '
+                f'(exit {result.returncode}): {result.stderr.decode(errors="ignore")}'
+            )
 
 
 def _parse_cluster_file(results_path: Path, threshold_str: str):
@@ -129,10 +128,10 @@ def _select_medoid(tmmatrix: pd.DataFrame, member_names):
 
 
 def _superpose_member(
-    name, reference_model_name, transforms, model_list, models_path, cluster_output_dir
+    name, reference_model_name, pair_store, model_list, models_path, cluster_output_dir
     ):
     '''Superpose a single cluster member onto the reference (medoid) structure.'''
-    transform_matrix = get_transform_matrix(transforms, name, reference_model_name)
+    transform_matrix = pair_store.transform(name, reference_model_name)
     if transform_matrix is None:
         print(
             f'Warning: no transform found for {name} -> {reference_model_name}, skipping superposition'
@@ -153,7 +152,7 @@ def _superpose_member(
 
 def _process_cluster(cluster_num, member_names, ctx, cluster_output_dir):
     '''Copy the medoid and superpose the rest of a single cluster's members onto it.'''
-    tmmatrix, transforms, model_list, models_path = ctx
+    tmmatrix, pair_store, model_list, models_path = ctx
 
     if cluster_num == -1:
         _copy_unclustered_members(member_names, model_list, models_path, cluster_output_dir)
@@ -174,13 +173,13 @@ def _process_cluster(cluster_num, member_names, ctx, cluster_output_dir):
         if name == reference_model_name:
             continue
         _superpose_member(
-            name, reference_model_name, transforms, model_list, models_path, cluster_output_dir
+            name, reference_model_name, pair_store, model_list, models_path, cluster_output_dir
             )
 
 
 # pylint: disable=too-many-arguments,too-many-positional-arguments
 def tree_clustering(thresholds, results_path: Path, tmmatrix: pd.DataFrame,
-                     transforms: dict, model_list, models_path: Path):
+                     pair_store, model_list, models_path: Path):
     '''
     Runs TreeCluster.py per threshold, superposes cluster members onto the
     cluster's medoid (highest MEAN TM-score to the rest of the cluster,
@@ -191,7 +190,7 @@ def tree_clustering(thresholds, results_path: Path, tmmatrix: pd.DataFrame,
 
     _run_treecluster(thresholds, results_path)
 
-    ctx = (tmmatrix, transforms, model_list, models_path)
+    ctx = (tmmatrix, pair_store, model_list, models_path)
     all_clusters_by_threshold = {}
 
     for thresh in thresholds:

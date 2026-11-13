@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "colabalign"
+version = "1.2.0"
+description = "All-vs-all US-align protein structure comparison, structural dendrograms, clustering and cluster-representative selection."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Christopher R. Field" }]
+requires-python = ">=3.10"
+# USalign, BeEM and TreeCluster.py are also required at runtime. USalign and
+# BeEM are not pip-installable; `conda install -c conda-forge -c bioconda
+# colabalign` installs everything.
+dependencies = [
+    "numpy",
+    "pandas",
+    "biopython",
+    "scipy",
+    "tqdm",
+    "treecluster",
+]
+keywords = ["protein structure", "structural alignment", "TM-score", "US-align", "dendrogram", "clustering"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.urls]
+Homepage = "https://github.com/crfield18/ColabAlign"
+Source = "https://github.com/crfield18/ColabAlign"
+Paper = "https://doi.org/10.1101/2025.10.06.677802"
+Code-DOI = "https://doi.org/10.5281/zenodo.14169501"
+
+[project.scripts]
+colabalign = "colabalign.pipeline:main"
+
+[tool.setuptools]
+packages = ["colabalign"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

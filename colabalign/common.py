@@ -40,7 +40,8 @@ def file_contains_protein(pdb_path):
 
 
 def extract_sequence(pdb_path):
-    '''Extract one-letter sequence from CA atoms of the first chain encountered.'''
+    '''Extract the one-letter sequence of the first chain, one letter per residue
+    USalign would read (ATOM C-alphas plus MSE).'''
     seq, seen_chain, seen_resnum = [], None, set()
     with open(pdb_path, 'r', encoding='utf8') as f:
         for line in f:
@@ -49,6 +50,11 @@ def extract_sequence(pdb_path):
             if line[12:16].strip() != 'CA':
                 continue
             resname = line[17:20].strip()
+            # A HETATM "CA" is usually a calcium ion, not a C-alpha. Only keep
+            # HETATM residues USalign also aligns (-het 2, i.e. MSE), so that
+            # residue indices here match USalign's.
+            if line.startswith('HETATM') and resname not in AA_CODES:
+                continue
             chain_id = line[21].strip()
             resnum = line[22:27].strip()
             if seen_chain is None:
@@ -60,3 +66,8 @@ def extract_sequence(pdb_path):
             seen_resnum.add(resnum)
             seq.append(THREE_TO_ONE.get(resname, 'X'))
     return ''.join(seq)
+
+
+def count_residues(pdb_path):
+    '''Number of residues USalign will align for a single-chain file (at least 1).'''
+    return max(len(extract_sequence(pdb_path)), 1)

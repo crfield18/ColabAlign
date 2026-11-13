@@ -34,27 +34,45 @@ Further information can be found at: <https://desmid.github.io/mview/manual/manu
 
 ### Installation for local usage
 
-ColabAlign.py is designed to work for Google Colab and running on local machines. A [YAML file](colabalign.yml) is provided for easy installation of dependencies in a Conda environment.
+ColabAlign is a Python package with a `colabalign` command. It also needs three external tools: [USalign](https://github.com/pylelab/USalign), [BeEM](https://github.com/kad-ecoli/BeEM/) (only for `.cif` inputs) and [TreeCluster](https://github.com/niemasd/TreeCluster).
 
-**For a Conda virtual environment install**, simply create an environment with:
+**Conda (recommended).** Installs ColabAlign and all external tools:
 
-`conda env create -f colabalign.yml`
+`conda install -c conda-forge -c bioconda colabalign`
 
-**Using PIP instead?** Since most of the depencencies are Python-based, they can be installed directly:
+**From source.** Create the environment from the provided [YAML file](colabalign.yml), which includes the external tools, then install the package:
 
-`pip install numpy pandas biopython scipy tqdm`
+```
+conda env create -f colabalign.yml
+conda activate colabalign
+pip install --no-deps .
+```
 
-The remaining tools, `USalign` and `BEeM`, need to be compiled from source. Please see their respective GitHub repos for more information (<https://github.com/pylelab/USalign> and <https://github.com/kad-ecoli/BeEM/>).
+**pip only.** `pip install .` installs the Python dependencies, but USalign and BeEM must be compiled from source (see their GitHub repos above). Point ColabAlign at the binaries with `-u /path/to/USalign` and `-b /path/to/BeEM` if they are not on your `PATH`.
 
-You can point ColabAlign at the USalign and BEeM binaries by including these flags:
+### Usage
 
-`-b /path/to/BEeM` or `--beem /path/to/BEeM`
+```
+colabalign -i structures/ more.zip extra.pdb -o results_dir -c 8 -t 0.20 0.30 -m first
+```
 
-and 
+`-i` accepts `.pdb`/`.cif` files, directories of them, and `.zip` archives. `python -m colabalign` works too. From Python:
 
-`-u /path/to/USalign` or `--usalign /path/to/USalign`
+```python
+from colabalign import ColabAlign
+ColabAlign(inputs=['structures/'], output='results_dir', cores=8, threshold=[0.2, 0.3]).run()
+```
 
 ---
+
+### Running the tests
+
+```bash
+pip install -e ".[test]"
+pytest
+```
+
+Tests that need USalign, BeEM or TreeCluster.py are skipped when those tools are not on `PATH`.
 
 ### References
 

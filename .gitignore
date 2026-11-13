@@ -1,0 +1,6 @@
+__pycache__/
+*.patch*.py[cod]
+*.egg-info/
+build/
+dist/
+*.patch

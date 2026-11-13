@@ -10,7 +10,7 @@ from scipy.cluster.hierarchy import linkage
 from scipy.spatial.distance import squareform
 from tqdm.auto import tqdm as tqdm_auto
 
-from common import extract_sequence
+from .common import extract_sequence
 
 NEG_INF = -1e9
 
@@ -305,84 +305,97 @@ def write_afasta(aligned_sequences, path, width=80):
 
 
 
+def build_cluster_alignment(sequences, library, tmmatrix, refine=True):
+    '''Build (and optionally refine) the aligned sequences for one cluster.'''
+    members = list(sequences)
+    if len(members) == 1:
+        return sequences
+    root_profile = build_cluster_msa(members, sequences, library, tmmatrix)
+    if refine:
+        root_profile = refine_msa(root_profile, library)
+    return profile_to_aligned_sequences(root_profile, sequences)
+
+
+def _write_cluster_outputs(pdb_dir, cluster_num, threshold, aligned, consensus):
+    '''Write the alignment and consensus FASTA files for one cluster.'''
+    afasta_path = pdb_dir.joinpath(f'threshold_{threshold}_cluster_{cluster_num}.afasta')
+    write_afasta(aligned, afasta_path)
+
+    consensus_path = pdb_dir.joinpath(
+        f'threshold_{threshold}_cluster_{cluster_num}_consensus.afasta'
+    )
+    with open(consensus_path, 'w', encoding='utf-8') as f:
+        f.write('>consensus\n')
+        for i in range(0, len(consensus), 80):
+            f.write(f'{consensus[i:i+80]}\n')
+
+
+# pylint: disable=too-many-arguments,too-many-positional-arguments
+def process_cluster(pdb_dir: Path, cluster_num, threshold, pair_store, sub_tmmatrix,
+                    refine=True):
+    '''
+    Build the MSA/consensus for one cluster and return its representative.
+    Runs in a worker process. It receives only this cluster's slice of the
+    TM-score matrix, and loads only this cluster's pairs from the PairStore.
+    '''
+    pdb_files = sorted(pdb_dir.glob('*.pdb'))
+    if not pdb_files:
+        return None, cluster_num, threshold
+
+    sequences = {p.stem: extract_sequence(p) for p in pdb_files}
+    library = pair_store.sub_library(list(sequences))
+    aligned = build_cluster_alignment(sequences, library, sub_tmmatrix, refine)
+    consensus = build_consensus(aligned, threshold=0.6)
+    _write_cluster_outputs(pdb_dir, cluster_num, threshold, aligned, consensus)
+
+    representative = find_nearest_sequence(aligned, consensus)
+    return representative, cluster_num, threshold
+
+
 class ClusterConsensus:
     '''Builds per-cluster MSAs, consensus sequences, and selects representatives.'''
 
-    def __init__(self, library: dict, tmmatrix, threads: int = 1, refine: bool = True) -> None:
-        '''Store shared alignment library, TM-score matrix, and run parameters.'''
-        self.library = library
+    def __init__(self, pair_store, tmmatrix, threads: int = 1, refine: bool = True) -> None:
+        '''Store the PairStore, TM-score matrix, and run parameters.'''
+        self.pair_store = pair_store
         self.tmmatrix = tmmatrix
         self.threads = threads
         self.refine = refine
 
-    def _build_cluster_alignment(self, sequences):
-        '''Build (and optionally refine) the aligned sequences for a cluster.'''
-        members = list(sequences)
-        if len(members) == 1:
-            return sequences
-        root_profile = build_cluster_msa(members, sequences, self.library, self.tmmatrix)
-        if self.refine:
-            root_profile = refine_msa(root_profile, self.library)
-        return profile_to_aligned_sequences(root_profile, sequences)
-
-    def _write_cluster_outputs(self, pdb_dir, cluster_num, threshold, aligned, consensus):
-        '''Write the alignment and consensus FASTA files for one cluster.'''
-        afasta_path = pdb_dir.joinpath(f'threshold_{threshold}_cluster_{cluster_num}.afasta')
-        write_afasta(aligned, afasta_path)
-
-        consensus_path = pdb_dir.joinpath(
-            f'threshold_{threshold}_cluster_{cluster_num}_consensus.afasta'
-        )
-        with open(consensus_path, 'w', encoding='utf-8') as f:
-            f.write('>consensus\n')
-            for i in range(0, len(consensus), 80):
-                f.write(f'{consensus[i:i+80]}\n')
-
-    def _process_cluster(self, pdb_dir: Path, cluster_num, threshold):
-        '''Build the MSA/consensus for one cluster and return its representative.'''
-        pdb_files = sorted(pdb_dir.glob('*.pdb'))
-        if not pdb_files:
-            return None, cluster_num, threshold
-
-        sequences = {p.stem: extract_sequence(p) for p in pdb_files}
-        aligned = self._build_cluster_alignment(sequences)
-        consensus = build_consensus(aligned, threshold=0.6)
-        self._write_cluster_outputs(pdb_dir, cluster_num, threshold, aligned, consensus)
-
-        representative = find_nearest_sequence(aligned, consensus)
-        return representative, cluster_num, threshold
-
     def _collect_jobs(self, results_path: Path, clusters_by_threshold: dict):
-        '''Build the list of (threshold, cluster_num, pdb_dir) jobs to process.'''
+        '''Build the list of (threshold, cluster_num, pdb_dir, member names) jobs.'''
         jobs = []
         for threshold_str, clusters in clusters_by_threshold.items():
-            for cluster_num in clusters:
+            for cluster_num, member_names in clusters.items():
                 if cluster_num == -1:
                     continue
                 pdb_dir = results_path.joinpath(f'clusters/{threshold_str}/{cluster_num}')
-                jobs.append((threshold_str, cluster_num, pdb_dir))
+                jobs.append((threshold_str, cluster_num, pdb_dir, member_names))
         return jobs
 
     def _run_jobs(self, jobs):
         '''Run cluster-processing jobs in a shared process pool and collect results.'''
-        representatives_by_threshold = {threshold_str: {} for threshold_str, _, _ in jobs}
+        representatives_by_threshold = {threshold_str: {} for threshold_str, *_ in jobs}
 
         with ProcessPoolExecutor(max_workers=self.threads) as executor:
             total_bar = tqdm_auto(
                 total=len(jobs), desc='Total clusters',
                 unit=' reps chosen', dynamic_ncols=True, leave=True,
             )
-            futures = [
-                executor.submit(self._process_cluster, pdb_dir, cluster_num, threshold_str)
-                for threshold_str, cluster_num, pdb_dir in jobs
-            ]
-            for fut in futures:
-                fut.add_done_callback(lambda _: total_bar.update(1))
-
+            futures = []
+            for threshold_str, cluster_num, pdb_dir, member_names in jobs:
+                members = [m for m in member_names if m in self.tmmatrix.index]
+                sub_tmmatrix = self.tmmatrix.loc[members, members]
+                futures.append(executor.submit(
+                    process_cluster, pdb_dir, cluster_num, threshold_str,
+                    self.pair_store, sub_tmmatrix, self.refine,
+                ))
             for future in as_completed(futures):
                 representative, cluster_num, threshold_str = future.result()
+                total_bar.update(1)
                 if representative is not None:
                     representatives_by_threshold[threshold_str][int(cluster_num)] = representative
+        total_bar.close()
 
         return representatives_by_threshold
 

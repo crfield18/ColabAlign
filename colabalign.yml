@@ -2,10 +2,10 @@ name: colabalign
 channels:
   - conda-forge
   - bioconda
-  - defaults
 dependencies:
 # Python and related packages
   - python=3.12
+  - pip
   - numpy
   - pandas
   - biopython
