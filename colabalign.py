@@ -4,6 +4,7 @@ from os import cpu_count
 import warnings
 from pathlib import Path
 from time import time
+import pandas as pd
 
 from cli import script_args
 from structure_prep import discover_input_models, prepare_models
