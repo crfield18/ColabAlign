@@ -63,7 +63,7 @@ python -m pip install --no-deps --no-build-isolation .
 
 Install US-align 20241201 and BeEM 1.0.1 separately, or use one of the full Conda locks. Do not apply the pip lock over a working Conda lock unless deliberately replacing its package provenance.
 
-The Colab notebook follows the `benchmarking` branch, pins its Konda bootstrap to 0.1.0 and creates a separate `colabalign` analysis environment from the explicit Linux lock instead of updating Google's base environment. Installation and analysis both use that environment. This freezes analysis dependencies but not Google's notebook kernel, hosted infrastructure or the Miniconda installer fetched by Konda. The hosted notebook has not been exercised by the local Linux package tests.
+The public Colab notebook follows `main`; `benchmarking` is for local testing only. The notebook pins its Konda bootstrap to 0.1.0 and creates a separate `colabalign` analysis environment from the explicit Linux lock instead of updating Google's base environment. Installation and analysis both use that environment. This freezes analysis dependencies but not Google's notebook kernel, hosted infrastructure or the Miniconda installer fetched by Konda. The hosted notebook has not been exercised by the local Linux package tests.
 
 ## Updating the pins
 
