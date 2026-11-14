@@ -1,10 +1,12 @@
 '''Tests for the on-disk PairStore and transform handling.'''
 # pylint: disable=redefined-outer-name
 
+import pickle
+
 import numpy as np
 import pytest
 
-from colabalign.pair_store import PairStore, file_hash
+from colabalign.pair_store import CACHE_SCHEMA_VERSION, PairStore, file_hash
 from colabalign.usalign_runner import reverse_transformation_matrix
 
 
@@ -72,6 +74,23 @@ def test_corrupt_cache_entry_is_treated_as_missing(store):
     store.cache_dir.mkdir(parents=True)
     store.cache_file('long', 'mid').write_bytes(b'not a pickle')
     assert store.load_canonical('long', 'mid') is None
+
+
+@pytest.mark.parametrize("prefix", ["", "v1_"])
+def test_old_weight_cache_namespaces_are_ignored_without_deletion(store, prefix):
+    store.cache_dir.mkdir(parents=True)
+    legacy = store.cache_dir / f'{prefix}hlong_hshort.pkl'
+    legacy.write_bytes(pickle.dumps(_entry(1)))
+    assert store.load_canonical('long', 'short') is None
+    assert legacy.exists()
+
+    store.save('long', 'short', _entry(2))
+    assert store.cache_file('long', 'short').name.startswith(f'v{CACHE_SCHEMA_VERSION}_')
+    assert legacy.exists()
+    assert np.allclose(
+        store.load_canonical('long', 'short')['transform_mx_forward'],
+        _entry(2)['transform_mx_forward'],
+    )
 
 
 def test_sub_library_only_loads_members(store):

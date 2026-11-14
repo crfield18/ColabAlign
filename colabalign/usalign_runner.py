@@ -85,9 +85,27 @@ def _extract_rotation_matrix(lines):
 
 
 def _compute_d0(length):
-    '''TM-score-style d0, with the standard floor for short structures
-    (avoids taking a fractional power of a negative number).'''
-    return 0.5 if length < 15 else max(1.24 * (length - 15) ** (1 / 3) - 1.8, 0.5)
+    '''Protein TM-score distance scale for a full normalizing chain length.'''
+    return 0.5 if length <= 21 else 1.24 * (length - 15) ** (1 / 3) - 1.8
+
+
+def _parse_structure_lengths(text):
+    '''Read both full chain lengths from default USalign output.
+
+    These are independent of how many residues were aligned. Missing or
+    invalid lengths must not silently select the old aligned-pair scale.
+    '''
+    lengths = {
+        int(structure): int(length)
+        for structure, length in re.findall(
+            r'^\s*Length of Structure_([12]):\s*(\d+)\s+residues\b', text, re.M
+        )
+    }
+    if set(lengths) != {1, 2} or min(lengths.values()) < 1:
+        raise ValueError(
+            f'Could not parse positive full chain lengths from USalign output:\n{text[:500]}'
+        )
+    return lengths[1], lengths[2]
 
 
 def _find_alignment_block(lines):
@@ -116,12 +134,18 @@ def _build_residue_pairs(seq_a, match_line, seq_b):
     return pairs_a, pairs_b, np.array(weights, dtype=np.float32)
 
 
-def _weight_by_distance(weights, do_distances):
-    '''Recompute weights from CA distances (TM-score-style falloff) when available.'''
+def _weight_by_distance(weights, do_distances, normalization_length):
+    '''Use the shorter full-chain d0 for 0--1 residue weights, not a TM-score.
+
+    Do not divide each weight by normalization_length: profile merging uses
+    the individual distance contributions, not a whole-chain normalized sum.
+    '''
+    if normalization_length < 1:
+        raise ValueError('The full-chain normalization length must be positive.')
     if len(do_distances) != len(weights) or len(weights) == 0:
         return weights
     d = np.array(do_distances, dtype=np.float32)
-    d0 = _compute_d0(len(d))
+    d0 = _compute_d0(normalization_length)
     return 1.0 / (1.0 + (d / d0) ** 2)
 
 
@@ -135,11 +159,13 @@ def _parse_tm_scores(text):
 
 def parse_usalign_stdout(stdout: bytes) -> dict:
     '''Parse default (full) USalign stdout: TM-scores, rotation matrix, and
-    residue-level equivalences with -do-based confidence weights.'''
+    residue-level equivalences with shorter-full-chain distance weights.'''
     text = stdout.decode('utf-8', errors='ignore')
     lines = text.splitlines()
 
     tm_1, tm_2 = _parse_tm_scores(text)
+    length_a, length_b = _parse_structure_lengths(text)
+    weight_length = min(length_a, length_b)
 
     aln_start = _find_alignment_block(lines)
     if aln_start is None or aln_start + 2 >= len(lines):
@@ -149,7 +175,7 @@ def parse_usalign_stdout(stdout: bytes) -> dict:
     do_distances = [float(m.group(1)) for l in lines if (m := DO_PATTERN.match(l))]
 
     pairs_a, pairs_b, weights = _build_residue_pairs(seq_a, match_line, seq_b)
-    weights = _weight_by_distance(weights, do_distances)
+    weights = _weight_by_distance(weights, do_distances, weight_length)
 
     transform_mx_forward = _extract_rotation_matrix(lines)
     transform_mx_reverse = (
@@ -165,6 +191,7 @@ def parse_usalign_stdout(stdout: bytes) -> dict:
         'res_a': np.array(pairs_a, dtype=np.int32),
         'res_b': np.array(pairs_b, dtype=np.int32),
         'weight': weights,
+        'weight_length': weight_length,
     }
 
 
@@ -478,5 +505,3 @@ def check_tm_matrix_completeness(tmmatrix):
             if pd.isna(tmmatrix.iat[i, j]):
                 missing.append((labels[i], labels[j]))
     return missing
-
-

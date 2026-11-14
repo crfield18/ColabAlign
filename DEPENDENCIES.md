@@ -86,4 +86,4 @@ For macOS cross-solves, set `CONDA_OVERRIDE_OSX=11.0` and select the target plat
 - Build and validate the final Conda package from that archive before submitting it to Bioconda.
 - Archive the released source, the lockfiles and benchmark provenance alongside the release.
 
-This dependency change does not modify the MSA residue-weighting algorithm, the treatment of missing alignments, or the historical experimental panel. Dependency pinning prevents future version drift; it does not establish equivalence between different ColabAlign algorithms or historical environments.
+The dependency pins are separate from the v1.2.0 MSA distance-scale revision described in [README.md](README.md#structure-informed-msa-distance-weights). That revision uses the shorter full chain for \(d_0\) and introduces a v2 pair-cache namespace so old weights are not silently reused. It retains the individual 0--1 weights, existing gap penalties and reported TM-score matrix. Neither change modifies the historical experimental panel, and dependency pinning does not establish equivalence between different ColabAlign algorithms or historical environments.
