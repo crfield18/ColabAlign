@@ -1,0 +1,5 @@
+include DEPENDENCIES.md
+include colabalign.yml
+recursive-include locks *.lock *.txt
+recursive-include conda-recipe *.yaml
+recursive-include tests *.py

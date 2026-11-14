@@ -7,6 +7,7 @@ package:
 
 source:
   url: https://github.com/crfield18/ColabAlign/archive/v{{ version }}.tar.gz
+  # Replace with the actual v1.2.0 source archive checksum after the tag exists.
   sha256: 0000000000000000000000000000000000000000000000000000000000000000
 
 build:
@@ -20,19 +21,20 @@ build:
 
 requirements:
   host:
-    - python >=3.10
-    - pip
-    - setuptools >=77
+    - python =3.12.16
+    - pip =26.2.2
+    - setuptools =84.2.1
+    - wheel =0.48.0
   run:
-    - python >=3.10
-    - numpy
-    - pandas
-    - biopython
-    - scipy
-    - tqdm
-    - treecluster
-    - usalign
-    - beem-bio
+    - python =3.12.16
+    - numpy =2.5.4
+    - pandas =3.1.1
+    - biopython =1.88
+    - scipy =1.18.1
+    - tqdm =4.70.1
+    - treecluster =1.0.5
+    - usalign =20241201
+    - beem-bio =1.0.1
 
 test:
   imports:

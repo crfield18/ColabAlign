@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from colabalign.common import count_residues
 from colabalign.usalign_runner import run_pairwise_alignments
 
 REAL = {'list_mode_max_residues': 10_000}     # always use USalign's -dir list mode
@@ -50,9 +51,14 @@ def test_list_mode_matches_per_pair(structures, usalign, tmp_path):
         assert np.allclose(sa.transform(x, y), sb.transform(x, y))
     la, lb = sa.sub_library(names), sb.sub_library(names)
     assert la.keys() == lb.keys()
+    by_name = {path.stem: path for path in structures}
     for key, entry in la.items():
         for field, value in entry.items():
             assert np.array_equal(value, lb[key][field])
+        expected_length = min(count_residues(by_name[name]) for name in key)
+        for store in (sa, sb):
+            cached, _ = store.load(*key)
+            assert cached['weight_length'] == expected_length
 
 
 @pytest.mark.parametrize('cores,tiles_per_core,target', [(1, 1, 10_000), (3, 8, 5)])

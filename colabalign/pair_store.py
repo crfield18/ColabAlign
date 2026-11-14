@@ -15,6 +15,11 @@ from itertools import combinations
 from pathlib import Path
 
 
+# Bump when cached result semantics change, not just their storage layout.
+# v2 uses the shorter full chain for d0; unversioned caches used aligned pairs.
+CACHE_SCHEMA_VERSION = 2
+
+
 def file_hash(path) -> str:
     '''Short sha256 hex digest of a file's contents, used in cache keys.'''
     digest = hashlib.sha256()
@@ -47,8 +52,14 @@ class PairStore:
         return stem_b, stem_a, True
 
     def cache_file(self, first: str, second: str) -> Path:
-        '''Cache path for a pair given in canonical orientation.'''
-        return self.cache_dir.joinpath(f'{self.hashes[first]}_{self.hashes[second]}.pkl')
+        '''Versioned cache path for a pair given in canonical orientation.
+
+        Previous namespaces are ignored, not deleted, so old residue weights
+        cannot be reused after an algorithm change.
+        '''
+        return self.cache_dir.joinpath(
+            f'v{CACHE_SCHEMA_VERSION}_{self.hashes[first]}_{self.hashes[second]}.pkl'
+        )
 
     def load_canonical(self, first: str, second: str):
         '''Load a cached result for a canonically ordered pair, or None if missing/corrupt.'''
