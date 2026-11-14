@@ -2,7 +2,7 @@
 
 ## Fast pairwise protein secondary structure comparisons using multiprocessing
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/crfield18/ColabAlign/blob/main/colabalign.ipynb) [![Code DOI](https://img.shields.io/badge/DOI-10.5281/zenodo.14169501-blue)](https://doi.org/10.5281/zenodo.14169501) [![Paper DOI](https://img.shields.io/badge/DOI-10.1101/2025.10.06.677802-green)](https://doi.org/10.1101/2025.10.06.677802)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/crfield18/ColabAlign/blob/benchmarking/colabalign.ipynb) [![Code DOI](https://img.shields.io/badge/DOI-10.5281/zenodo.14169501-blue)](https://doi.org/10.5281/zenodo.14169501) [![Paper DOI](https://img.shields.io/badge/DOI-10.1101/2025.10.06.677802-green)](https://doi.org/10.1101/2025.10.06.677802)
 
 This notebook performs pairwise protein structural alignments using the [US-align](https://zhanggroup.org/US-align/) algorithm by [Zhang _et al._, (2022)](https://doi.org/10.1038/s41592-022-01585-1), then constructs a structure-informed dendrogram using the UPGMA algorithm to visualise similarities.
 
@@ -77,21 +77,11 @@ ColabAlign(inputs=['structures/'], output='results_dir', cores=8, threshold=[0.2
 
 ### Structure-informed MSA distance weights
 
-The v1.2.0 structure-informed MSA uses US-align residue correspondences with distance weights \(w_k = 1/[1+(d_k/d_0)^2]\). The length used to calculate \(d_0\) is the shorter of the two **full chain lengths reported by US-align**, not the number of aligned residue pairs. For proteins, \(d_0=0.5\) Å for lengths up to 21 residues; otherwise \(d_0=1.24(L-15)^{1/3}-1.8\) Å, following the [US-align protein distance-scale calculation](https://raw.githubusercontent.com/pylelab/USalign/master/param_set.h).
+The v1.2.0 structure-informed MSA weights US-align residue correspondences by \(w_k = 1/[1+(d_k/d_0)^2]\), using the shorter full chain length reported from the supplied coordinates, rather than the aligned-pair count. Following the [US-align protein distance-scale calculation](https://raw.githubusercontent.com/pylelab/USalign/master/param_set.h), \(d_0=0.5\) Å through 21 residues and \(d_0=1.24(L-15)^{1/3}-1.8\) Å otherwise.
 
-This is a symmetric choice of distance scale for the MSA library, not a new implementation of a complete TM-score. The individual weights remain between 0 and 1 and are **not divided by chain length**. Profile gap-opening and gap-extension penalties remain 6 and 1. The two reported TM-scores, their retained maximum, the structural dendrogram and clustering procedure are unchanged.
+Individual weights remain between 0 and 1 and are not divided by chain length. This changes the MSA distance scale, not TM-score normalisation; the reported TM-score matrix, tree/clustering procedure and 6/1 profile gap penalties are unchanged. MSAs and selected representatives can change, without implying improved alignment accuracy.
 
-Earlier implementations based \(d_0\) on the aligned-pair count. Changing to a full-chain scale can change MSAs, consensuses and selected representatives, particularly for partial alignments; it is an intentional algorithm revision, not a claim of improved alignment accuracy. Performance benchmarks and representative-selection comparisons should record the exact source commit and distinguish this revision from batching-only changes.
-
-Per-pair caches now use a `v2_` filename namespace. Unversioned and older-version cached weights are ignored and recomputed automatically, without deleting the older files. Valid v2 results remain reusable across interrupted runs and different batching layouts. When distances cannot be parsed consistently, the existing match-symbol fallback weights of 1.0 and 0.5 are retained.
-
-Relevant limits and edge cases are:
-
-- **Partial alignments and long tails.** The spatial tolerance no longer shrinks when fewer residues align. The shorter-chain convention limits the effect of one much longer partner, but two long multidomain proteins or proteins with large unaligned tails can still receive a permissive distance scale. This is not an alignment-coverage filter.
-- **Incomplete structures.** Full chain length means the residues read and reported by US-align from the supplied coordinates, not the full biological sequence or the span of residue numbers. Missing coordinates and residue-selection options can therefore affect the scale.
-- **Short chains.** The standard protein distance-scale floor is used through 21 residues. Empty or missing reported chain lengths are rejected rather than falling back to the aligned-pair count.
-- **Output parsing.** Missing or inconsistent distance tables preserve the match-symbol fallback, so such pairs are not distance-weighted. If full chain lengths cannot be read, the pair is reported as failed; the pipeline's existing missing-pair policy assigns TM-score 0 when building the tree. Check failure warnings before interpreting clusters.
-- **Benchmark interpretation.** The MSA rule and batching changes should not be credited as a single performance intervention. Alignment-only benchmarks exclude downstream MSA and representative-selection costs; alignment quality and representative stability need separate comparisons.
+Pair caches use a `v2_` filename namespace, so older weights are recomputed without deleting the old files. Missing or inconsistent distance tables retain the existing 1.0/0.5 match-symbol fallback; missing or nonpositive chain lengths fail the pair rather than silently using a different scale.
 
 ### Running the tests
 

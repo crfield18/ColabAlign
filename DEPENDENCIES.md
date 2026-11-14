@@ -63,7 +63,7 @@ python -m pip install --no-deps --no-build-isolation .
 
 Install US-align 20241201 and BeEM 1.0.1 separately, or use one of the full Conda locks. Do not apply the pip lock over a working Conda lock unless deliberately replacing its package provenance.
 
-The Colab notebook pins its Konda bootstrap to 0.1.0 and creates a separate `colabalign` analysis environment from the explicit Linux lock instead of updating Google's base environment. Installation and analysis both use that environment. This freezes analysis dependencies but not Google's notebook kernel, hosted infrastructure or the Miniconda installer fetched by Konda. The hosted notebook has not been exercised by the local Linux package tests.
+The Colab notebook follows the `benchmarking` branch, pins its Konda bootstrap to 0.1.0 and creates a separate `colabalign` analysis environment from the explicit Linux lock instead of updating Google's base environment. Installation and analysis both use that environment. This freezes analysis dependencies but not Google's notebook kernel, hosted infrastructure or the Miniconda installer fetched by Konda. The hosted notebook has not been exercised by the local Linux package tests.
 
 ## Updating the pins
 
@@ -86,4 +86,4 @@ For macOS cross-solves, set `CONDA_OVERRIDE_OSX=11.0` and select the target plat
 - Build and validate the final Conda package from that archive before submitting it to Bioconda.
 - Archive the released source, the lockfiles and benchmark provenance alongside the release.
 
-The dependency pins are separate from the v1.2.0 MSA distance-scale revision described in [README.md](README.md#structure-informed-msa-distance-weights). That revision uses the shorter full chain for \(d_0\) and introduces a v2 pair-cache namespace so old weights are not silently reused. It retains the individual 0--1 weights, existing gap penalties and reported TM-score matrix. Neither change modifies the historical experimental panel, and dependency pinning does not establish equivalence between different ColabAlign algorithms or historical environments.
+The MSA distance-scale revision and v2 cache namespace are documented in [README.md](README.md#structure-informed-msa-distance-weights). Dependency pinning does not establish equivalence with historical algorithms or environments.
