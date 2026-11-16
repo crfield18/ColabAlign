@@ -22,7 +22,11 @@ The v1.2.0 package uses exact direct dependency versions rather than resolving w
 | build (`python-build` in Conda) | 1.6.1 |
 | Konda (Colab bootstrap only) | 0.1.0 |
 
-`pyproject.toml` pins the direct Python runtime, build-system, test and release dependencies. `colabalign.yml` and the Conda recipe pin the corresponding versions plus the interpreter and external tools. Package metadata supports the Python 3.12 series; the reference environment and Conda recipe specify the exact interpreter patch version. Other Python minor versions are not claimed to be tested by this release.
+`colabalign.yml` pins every direct dependency exactly, plus the interpreter and external tools, and the reference environment specifies the exact interpreter patch version. `pyproject.toml` pins the build-system, test and release tooling exactly.
+
+The runtime dependencies in `pyproject.toml` and the Conda recipe use matching compatible ranges instead. An exactly pinned `noarch: python` package would only install into an environment identical to the reference, and its pip metadata would fail `pip check` as soon as Conda selected a newer patch release. Each runtime dependency is bounded below by its tested version and, where it has a major-version scheme, above by the next major version. The Python range in both files is the 3.12 series; other Python minor versions are not claimed to be tested by this release. `tests/test_dependency_pins.py` checks that the two sets of ranges agree and that every reference pin falls inside them.
+
+Installing the package, from Conda or with `pip install .`, therefore gives compatible but not necessarily identical versions. Use the locks below for exact reproduction.
 
 Biopython 1.88 includes the UPGMA clade-height correction introduced in 1.85. Reproducing a historical dendrogram generated with older Biopython may require that historical environment rather than this release baseline. See the [Biopython correction](https://github.com/biopython/biopython/pull/3951) and the manuscript's provenance discussion.
 
@@ -67,11 +71,12 @@ The public Colab notebook follows `main`; `benchmarking` is for local testing on
 
 ## Updating the pins
 
-Update `pyproject.toml`, `colabalign.yml` and `conda-recipe/colabalign/meta.yaml` together. Re-solve the YAML using strict channel priority for every supported platform, export exact URLs and hashes to the explicit locks, and regenerate the Python lock:
+Update the exact pins in `colabalign.yml` and `locks/reference-constraints.txt` together, along with the tooling pins in `pyproject.toml`. If a new pin falls outside the runtime ranges, widen them in both `pyproject.toml` and `conda-recipe/colabalign/meta.yaml`. Re-solve the YAML using strict channel priority for every supported platform, export exact URLs and hashes to the explicit locks, and regenerate the Python lock:
 
 ```bash
 uv pip compile pyproject.toml --extra test --extra release \
     --python-version 3.12 --universal --generate-hashes \
+    --constraint locks/reference-constraints.txt \
     --output-file locks/requirements-py312.txt
 ```
 

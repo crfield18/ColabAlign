@@ -58,7 +58,7 @@ conda activate colabalign
 python -m pip install --no-deps --no-build-isolation .
 ```
 
-**pip only.** `pip install .` installs the exactly pinned direct Python dependencies. Use the Python lock as described in [DEPENDENCIES.md](DEPENDENCIES.md) to pin transitive dependencies too. USalign 20241201 and BeEM 1.0.1 must be installed separately. Point ColabAlign at the binaries with `-u /path/to/USalign` and `-b /path/to/BeEM` if they are not on your `PATH`.
+**pip only.** `pip install .` installs compatible versions of the Python dependencies. For the exact reference versions, including transitive dependencies, install from the Python lock as described in [DEPENDENCIES.md](DEPENDENCIES.md). USalign 20241201 and BeEM 1.0.1 must be installed separately. Point ColabAlign at the binaries with `-u /path/to/USalign` and `-b /path/to/BeEM` if they are not on your `PATH`.
 
 ### Usage
 

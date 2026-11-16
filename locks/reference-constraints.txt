@@ -1,0 +1,8 @@
+# Exact reference versions of the ranged runtime dependencies in pyproject.toml.
+# Used as uv constraints when regenerating requirements-py312.txt.
+numpy==2.5.4
+pandas==3.1.1
+biopython==1.88
+scipy==1.18.1
+tqdm==4.70.1
+treecluster==1.0.5
