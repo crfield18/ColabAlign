@@ -101,7 +101,6 @@ BibTeX-formatted references for this project and the associated references can b
 - **BioPython**: <https://doi.org/10.1093/bioinformatics/btp163>
 - **US-align**: <https://doi.org/10.1038/s41592-022-01585-1>
 - **TreeCluster**: <https://doi.org/10.1371/journal.pone.0221068>
-- **MUSTANG**: <https://doi.org/10.1002/prot.20921>
 - **MView**: <https://doi.org/10.1093/bioinformatics/14.4.380>
 - **BeEM**: <https://doi.org/10.1186/s12859-023-05388-9>
 
