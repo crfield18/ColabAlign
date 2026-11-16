@@ -38,8 +38,8 @@ def test_python_dependency_pins_match_conda():
     for extra in project["project"]["optional-dependencies"].values():
         specs += extra
     assert _python_pins(specs).items() <= env.items()
-    assert project["project"]["requires-python"] == ">=3.12,<3.13"
-    assert env["python"].startswith("3.12.")
+    assert project["project"]["requires-python"] == ">=3.14,<3.15"
+    assert env["python"].startswith("3.14.")
 
 
 def test_recipe_pins_match_reference_environment():
@@ -55,7 +55,7 @@ def test_python_lock_has_hashes_and_matches_project_pins():
     specs = project["project"]["dependencies"] + project["build-system"]["requires"]
     for extra in project["project"]["optional-dependencies"].values():
         specs += extra
-    lines = (ROOT / "locks/requirements-py312.txt").read_text(encoding="utf-8").splitlines()
+    lines = (ROOT / "locks/requirements-py314.txt").read_text(encoding="utf-8").splitlines()
     resolved_specs = []
     for index, line in enumerate(lines):
         match = re.match(r"^([\w-]+==[\w.]+)", line)

@@ -6,7 +6,7 @@ The v1.2.0 package uses exact direct dependency versions rather than resolving w
 
 | Component | Version |
 |---|---|
-| Python | 3.12.16 |
+| Python | 3.14.10 |
 | NumPy | 2.5.4 |
 | pandas | 3.1.1 |
 | Biopython | 1.88 |
@@ -22,7 +22,7 @@ The v1.2.0 package uses exact direct dependency versions rather than resolving w
 | build (`python-build` in Conda) | 1.6.1 |
 | Konda (Colab bootstrap only) | 0.1.0 |
 
-`pyproject.toml` pins the direct Python runtime, build-system, test and release dependencies. `colabalign.yml` and the Conda recipe pin the corresponding versions plus the interpreter and external tools. Package metadata supports the Python 3.12 series; the reference environment and Conda recipe specify the exact interpreter patch version. Other Python minor versions are not claimed to be tested by this release.
+`pyproject.toml` pins the direct Python runtime, build-system, test and release dependencies. `colabalign.yml` and the Conda recipe pin the corresponding versions plus the interpreter and external tools. Package metadata supports the Python 3.14 series; the reference environment and Conda recipe specify the exact interpreter patch version. Other Python minor versions are not claimed to be tested by this release.
 
 Biopython 1.88 includes the UPGMA clade-height correction introduced in 1.85. Reproducing a historical dendrogram generated with older Biopython may require that historical environment rather than this release baseline. See the [Biopython correction](https://github.com/biopython/biopython/pull/3951) and the manuscript's provenance discussion.
 
@@ -53,11 +53,11 @@ python -m build --no-isolation
 
 ## Exact Python-only environment
 
-`locks/requirements-py312.txt` freezes the Python runtime, test, release and transitive dependencies with SHA-256 archive hashes. It does not install Python itself or the US-align and BeEM executables.
+`locks/requirements-py314.txt` freezes the Python runtime, test, release and transitive dependencies with SHA-256 archive hashes. It does not install Python itself or the US-align and BeEM executables.
 
 ```bash
-# Start with a clean Python 3.12.16 virtual environment.
-python -m pip install --require-hashes -r locks/requirements-py312.txt
+# Start with a clean Python 3.14.10 virtual environment.
+python -m pip install --require-hashes -r locks/requirements-py314.txt
 python -m pip install --no-deps --no-build-isolation .
 ```
 
@@ -71,8 +71,8 @@ Update `pyproject.toml`, `colabalign.yml` and `conda-recipe/colabalign/meta.yaml
 
 ```bash
 uv pip compile pyproject.toml --extra test --extra release \
-    --python-version 3.12 --universal --generate-hashes \
-    --output-file locks/requirements-py312.txt
+    --python-version 3.14 --universal --generate-hashes \
+    --output-file locks/requirements-py314.txt
 ```
 
 For macOS cross-solves, set `CONDA_OVERRIDE_OSX=11.0` and select the target platform. Do not invent build strings or hashes, or copy them between architectures. Recreate at least the native test environment from the resulting lock and run the complete suite, including tests requiring US-align, BeEM and TreeCluster.

@@ -36,7 +36,7 @@ Further information can be found at: <https://desmid.github.io/mview/manual/manu
 
 ColabAlign is a Python package with a `colabalign` command. It also needs three external tools: [USalign](https://github.com/pylelab/USalign), [BeEM](https://github.com/kad-ecoli/BeEM/) (only for `.cif` inputs) and [TreeCluster](https://github.com/niemasd/TreeCluster).
 
-The v1.2.0 reference environment uses Python 3.12.16 and exact dependency versions. See [the dependency and release notes](DEPENDENCIES.md) for the pinning policy, complete environment locks and release checks. Biopython is pinned to 1.88, which includes the corrected UPGMA clade-height calculation; historical trees from older Biopython versions may therefore differ.
+The reference environment uses Python 3.14.10 and exact dependency versions. See [the dependency and release notes](DEPENDENCIES.md) for the pinning policy, complete environment locks and release checks. Biopython is pinned to 1.88, which includes the corrected UPGMA clade-height calculation; historical trees from older Biopython versions may therefore differ.
 
 **Conda package (once published).** Installs ColabAlign and all external tools:
 
@@ -70,8 +70,12 @@ colabalign -i structures/ more.zip extra.pdb -o results_dir -c 8 -t 0.20 0.30 -m
 
 ```python
 from colabalign import ColabAlign
-ColabAlign(inputs=['structures/'], output='results_dir', cores=8, threshold=[0.2, 0.3]).run()
+
+if __name__ == '__main__':
+    ColabAlign(inputs=['structures/'], output='results_dir', cores=8, threshold=[0.2, 0.3]).run()
 ```
+
+Keep the `if __name__ == '__main__':` guard in scripts. ColabAlign runs work in separate processes, and on Python 3.14 (Linux and macOS) those processes import the calling script, so an unguarded call would start the run again inside each worker and fail. The command line, `python -m colabalign` and notebooks need no guard.
 
 ---
 
