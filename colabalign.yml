@@ -2,16 +2,21 @@ name: colabalign
 channels:
   - conda-forge
   - bioconda
+  - nodefaults
 dependencies:
-# Python and related packages
-  - python=3.12
-  - pip
-  - numpy
-  - pandas
-  - biopython
-  - scipy
-  - tqdm
+# Release reference interpreter, Python libraries and build/test tools
+  - python=3.12.16
+  - pip=26.2.2
+  - setuptools=84.2.1
+  - wheel=0.48.0
+  - numpy=2.5.4
+  - pandas=3.1.1
+  - biopython=1.88
+  - scipy=1.18.1
+  - tqdm=4.70.1
+  - pytest=9.2.0
+  - python-build=1.6.1
 # Bioinformatics tools
-  - treecluster
-  - usalign
-  - beem-bio
+  - treecluster=1.0.5
+  - usalign=20241201
+  - beem-bio=1.0.1
