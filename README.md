@@ -76,7 +76,7 @@ Keep the `if __name__ == '__main__':` guard in scripts. ColabAlign runs work in 
 
 ### Structure-informed MSA distance weights
 
-The structure-informed MSA weights US-align residue correspondences by $w_k = \dfrac{1}{[1+(d_k/d_0)^2]}$, using the shorter full chain length reported from the supplied coordinates, rather than the aligned-pair count. Following the [US-align protein distance-scale calculation](https://raw.githubusercontent.com/pylelab/USalign/master/param_set.h), $d_0=0.5\;\text{Å}$ through 21 residues and $d_0=1.24(L-15)^{1/3}-1.8\;\text{Å}$ otherwise.
+The structure-informed MSA weights US-align residue correspondences by $w_k = \dfrac{1}{[1+(d_k/d_0)^2]}$, using the shorter full chain length reported from the supplied coordinates, rather than the aligned-pair count. Following the [US-align protein distance-scale calculation](https://raw.githubusercontent.com/pylelab/USalign/master/param_set.h), $d_0=0.5~\text{Å}$ through 21 residues and $d_0=1.24(L-15)^{1/3}-1.8~\text{Å}$ otherwise.
 
 Individual weights remain between 0 and 1 and are not divided by chain length. This changes the MSA distance scale, not TM-score normalisation; the reported TM-score matrix, tree/clustering procedure and 6/1 profile gap penalties are unchanged. MSAs and selected representatives can change, without implying improved alignment accuracy.
 
