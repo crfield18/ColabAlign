@@ -94,7 +94,7 @@ The reference Conda environment already includes the pinned test tools. Tests th
 
 ### References
 
-BibTeX-formatted references for this project and the associated references can be found in [colabalign.bib](colabalign.bib) and [associated-references.bib](associated-references.bib).
+BibTeX-formatted references for this project and the associated references can be found in [references.bib](references.bib).
 
 - **ColabAlign (paper)**: <https://doi.org/10.1101/2025.10.06.677802>
 - **ColabAlign (code only)**: <https://doi.org/10.5281/ZENODO.14169501>
