@@ -1,0 +1,64 @@
+# ColabAlign Apptainer image built from the exact linux-64 reference lock
+# (locks/conda-linux-64.lock: Python 3.14.10, USalign, BeEM, TreeCluster).
+#
+# Build from the repository root (needs root, --fakeroot or user namespaces):
+#   apptainer build colabalign.sif containers/colabalign.def
+#
+# Run. Apptainer binds $HOME, /tmp and the current directory by default:
+#   apptainer run colabalign.sif -i structures -o results -c 8 -t 0.2 0.3
+#
+# Alternatively, convert a locally built Docker image:
+#   apptainer build colabalign.sif docker-daemon://colabalign:1.2.0
+
+Bootstrap: docker
+# mambaorg/micromamba:2.10.0-debian13-slim. Apptainer rejects references
+# with both a tag and a digest, so pin the digest only.
+From: mambaorg/micromamba@sha256:e1476182cd40eb1f7c0cfae4adec9bfd78f3d7f05c61368306abfdc8939c1198
+
+%labels
+    # Not org.opencontainers.image.*: the base image already sets those, and
+    # Apptainer keeps the existing values rather than overwriting them.
+    colabalign.title ColabAlign
+    colabalign.version 1.2.0
+    colabalign.source https://github.com/crfield18/ColabAlign
+    colabalign.license MIT
+
+%files
+    locks/conda-linux-64.lock /opt/colabalign-src/conda-linux-64.lock
+    pyproject.toml /opt/colabalign-src/
+    README.md /opt/colabalign-src/
+    LICENSE /opt/colabalign-src/
+    MANIFEST.in /opt/colabalign-src/
+    colabalign /opt/colabalign-src/
+
+%post
+    set -eu
+    export MAMBA_ROOT_PREFIX=/opt/conda
+    # Exact, hash-checked environment from the reference lock.
+    micromamba install --yes --root-prefix /opt/conda --prefix /opt/conda \
+        --file /opt/colabalign-src/conda-linux-64.lock
+    micromamba clean --all --yes
+    # Install ColabAlign itself without touching the locked dependencies.
+    /opt/conda/bin/python -m pip install --no-deps --no-build-isolation --no-cache-dir /opt/colabalign-src
+    rm -rf /opt/colabalign-src
+    PYTHONNOUSERSITE=1 /opt/conda/bin/python -m pip check
+
+%environment
+    export PATH=/opt/conda/bin:$PATH
+    export MAMBA_ROOT_PREFIX=/opt/conda
+    # $HOME is bind-mounted, so ignore any user site-packages it contains.
+    export PYTHONNOUSERSITE=1
+
+%runscript
+    exec colabalign "$@"
+
+%test
+    colabalign --version
+    USalign -h > /dev/null
+    command -v BeEM > /dev/null
+    TreeCluster.py -h > /dev/null
+
+%help
+    ColabAlign 1.2.0: all-vs-all US-align structural comparison and clustering.
+    Usage: apptainer run colabalign.sif -i <inputs> -o <output> [options]
+    Run "apptainer run colabalign.sif --help" for all options.

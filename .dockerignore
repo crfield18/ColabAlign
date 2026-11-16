@@ -1,0 +1,10 @@
+# Only the lock, package metadata and source are needed for the image.
+*
+!locks/conda-linux-64.lock
+!pyproject.toml
+!README.md
+!LICENSE
+!MANIFEST.in
+!colabalign/
+colabalign/__pycache__/
+**/*.py[cod]
