@@ -54,11 +54,10 @@ def _tooling_specs(project):
 def test_python_dependency_pins_match_conda():
     project = _read_project()
     env = _conda_pins(ROOT / "colabalign.yml")
-    specs = project["project"]["dependencies"] + project["build-system"]["requires"]
-    for extra in project["project"]["optional-dependencies"].values():
-        specs += extra
-    assert _python_pins(specs).items() <= env.items()
-    assert project["project"]["requires-python"] == ">=3.14,<3.15"
+    assert _python_pins(_tooling_specs(project)).items() <= env.items()
+    for name, specifier in _python_ranges(project["project"]["dependencies"]).items():
+        assert Version(env[name]) in SpecifierSet(specifier), (name, specifier, env[name])
+    assert project["project"]["requires-python"] == ">=3.14"
     assert env["python"].startswith("3.14.")
 
 
@@ -95,9 +94,7 @@ def test_recipe_ranges_contain_reference_environment():
 
 def test_python_lock_has_hashes_and_matches_project_pins():
     project = _read_project()
-    specs = project["project"]["dependencies"] + project["build-system"]["requires"]
-    for extra in project["project"]["optional-dependencies"].values():
-        specs += extra
+    env = _conda_pins(ROOT / "colabalign.yml")
     lines = (ROOT / "locks/requirements-py314.txt").read_text(encoding="utf-8").splitlines()
     resolved_specs = []
     for index, line in enumerate(lines):
