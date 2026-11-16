@@ -24,20 +24,20 @@ requirements:
   # package would only install into the reference environment. Lower bounds are
   # the tested versions; locks/ holds the exact reproducible environments.
   host:
-    - python >=3.12,<3.13
-    - pip
-    - setuptools >=77
-    - wheel
+    - python =3.14.10
+    - pip =26.2.2
+    - setuptools =84.2.1
+    - wheel =0.48.0
   run:
-    - python >=3.12,<3.13
-    - numpy >=2.5,<3
-    - pandas >=3.1,<4
-    - biopython >=1.88,<2
-    - scipy >=1.18,<2
-    - tqdm >=4.70,<5
-    - treecluster >=1.0.5,<2
-    - usalign >=20241201
-    - beem-bio >=1.0.1,<2
+    - python =3.14.10
+    - numpy =2.5.4
+    - pandas =3.1.1
+    - biopython =1.88
+    - scipy =1.18.1
+    - tqdm =4.70.1
+    - treecluster =1.0.5
+    - usalign =20241201
+    - beem-bio =1.0.1
 
 test:
   imports:

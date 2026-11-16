@@ -34,9 +34,6 @@ Further information can be found at: <https://desmid.github.io/mview/manual/manu
 
 ### Installation for local usage
 
-ColabAlign is a Python package with a `colabalign` command. It also needs three external tools: [USalign](https://github.com/pylelab/USalign), [BeEM](https://github.com/kad-ecoli/BeEM/) (only for `.cif` inputs) and [TreeCluster](https://github.com/niemasd/TreeCluster).
-
-The v1.2.0 reference environment uses Python 3.12.16 and exact dependency versions. See [the dependency and release notes](DEPENDENCIES.md) for the pinning policy, complete environment locks and release checks. Biopython is pinned to 1.88, which includes the corrected UPGMA clade-height calculation; historical trees from older Biopython versions may therefore differ.
 
 **Conda package (once published).** Installs ColabAlign and all external tools:
 
@@ -58,8 +55,6 @@ conda activate colabalign
 python -m pip install --no-deps --no-build-isolation .
 ```
 
-**pip only.** `pip install .` installs compatible versions of the Python dependencies. For the exact reference versions, including transitive dependencies, install from the Python lock as described in [DEPENDENCIES.md](DEPENDENCIES.md). USalign 20241201 and BeEM 1.0.1 must be installed separately. Point ColabAlign at the binaries with `-u /path/to/USalign` and `-b /path/to/BeEM` if they are not on your `PATH`.
-
 ### Usage
 
 ```
@@ -70,14 +65,18 @@ colabalign -i structures/ more.zip extra.pdb -o results_dir -c 8 -t 0.20 0.30 -m
 
 ```python
 from colabalign import ColabAlign
-ColabAlign(inputs=['structures/'], output='results_dir', cores=8, threshold=[0.2, 0.3]).run()
+
+if __name__ == '__main__':
+    ColabAlign(inputs=['structures/'], output='results_dir', cores=8, threshold=[0.2, 0.3]).run()
 ```
+
+Keep the `if __name__ == '__main__':` guard in scripts. ColabAlign runs work in separate processes, and on Python 3.14 (Linux and macOS) those processes import the calling script, so an unguarded call would start the run again inside each worker and fail. The command line, `python -m colabalign` and notebooks need no guard.
 
 ---
 
 ### Structure-informed MSA distance weights
 
-The v1.2.0 structure-informed MSA weights US-align residue correspondences by \(w_k = 1/[1+(d_k/d_0)^2]\), using the shorter full chain length reported from the supplied coordinates, rather than the aligned-pair count. Following the [US-align protein distance-scale calculation](https://raw.githubusercontent.com/pylelab/USalign/master/param_set.h), \(d_0=0.5\) Å through 21 residues and \(d_0=1.24(L-15)^{1/3}-1.8\) Å otherwise.
+The structure-informed MSA weights US-align residue correspondences by $w_k = \dfrac{1}{[1+(d_k/d_0)^2]}$, using the shorter full chain length reported from the supplied coordinates, rather than the aligned-pair count. Following the [US-align protein distance-scale calculation](https://raw.githubusercontent.com/pylelab/USalign/master/param_set.h), $d_0=0.5\;\text{Å}$ through 21 residues and $d_0=1.24(L-15)^{1/3}-1.8\;\text{Å}$ otherwise.
 
 Individual weights remain between 0 and 1 and are not divided by chain length. This changes the MSA distance scale, not TM-score normalisation; the reported TM-score matrix, tree/clustering procedure and 6/1 profile gap penalties are unchanged. MSAs and selected representatives can change, without implying improved alignment accuracy.
 
@@ -97,9 +96,9 @@ The reference Conda environment already includes the pinned test tools. Tests th
 BibTeX-formatted references for this project and the associated references can be found in [references.bib](references.bib).
 
 - **ColabAlign (paper)**: <https://doi.org/10.1101/2025.10.06.677802>
-- **ColabAlign (code only)**: <https://doi.org/10.5281/ZENODO.14169501>
+- **ColabAlign (code)**: <https://doi.org/10.5281/ZENODO.14169501>
 - **BioPython**: <https://doi.org/10.1093/bioinformatics/btp163>
-- **SciPy**: <https://doi.org/10.1038/s41592-019-0686-2> <!-- TEMPORARY: pending confirmation before merge (PR #3) -->
+- **SciPy**: <https://doi.org/10.1038/s41592-019-0686-2>
 - **US-align**: <https://doi.org/10.1038/s41592-022-01585-1>
 - **TreeCluster**: <https://doi.org/10.1371/journal.pone.0221068>
 - **MView**: <https://doi.org/10.1093/bioinformatics/14.4.380>
