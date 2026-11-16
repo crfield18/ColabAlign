@@ -7,8 +7,7 @@ package:
 
 source:
   url: https://github.com/crfield18/ColabAlign/archive/v{{ version }}.tar.gz
-  # Replace with the actual v1.2.0 source archive checksum after the tag exists.
-  sha256: 0000000000000000000000000000000000000000000000000000000000000000
+  sha256: 8985c548309c17aeb95236ceabf0194ad266629912b0d599f26a86b785d4c5ad
 
 build:
   number: 0
