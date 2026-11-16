@@ -10,7 +10,7 @@ from scipy.cluster.hierarchy import linkage
 from scipy.spatial.distance import squareform
 from tqdm.auto import tqdm as tqdm_auto
 
-from .common import extract_sequence
+from .common import extract_sequence, process_context
 
 NEG_INF = -1e9
 
@@ -377,7 +377,7 @@ class ClusterConsensus:
         '''Run cluster-processing jobs in a shared process pool and collect results.'''
         representatives_by_threshold = {threshold_str: {} for threshold_str, *_ in jobs}
 
-        with ProcessPoolExecutor(max_workers=self.threads) as executor:
+        with ProcessPoolExecutor(max_workers=self.threads, mp_context=process_context()) as executor:
             total_bar = tqdm_auto(
                 total=len(jobs), desc='Total clusters',
                 unit=' reps chosen', dynamic_ncols=True, leave=True,

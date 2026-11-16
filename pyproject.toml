@@ -10,22 +10,26 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Christopher R. Field" }]
-requires-python = ">=3.14,<3.15"
+requires-python = ">=3.12"
 # USalign, BeEM and TreeCluster.py are also required at runtime. USalign and
 # BeEM are not pip-installable; `conda install -c conda-forge -c bioconda
 # colabalign` installs everything.
 dependencies = [
-    "numpy==2.5.4",
-    "pandas==3.1.1",
-    "biopython==1.88",
-    "scipy==1.18.1",
-    "tqdm==4.70.1",
-    "treecluster==1.0.5",
+    # Compatible ranges matching the Conda recipe. Exact versions live in locks/.
+    "numpy>=2.5,<3",
+    "pandas>=3.1,<4",
+    "biopython>=1.88,<2",
+    "scipy>=1.18,<2",
+    "tqdm>=4.70,<5",
+    "treecluster>=1.0.5,<2",
 ]
 keywords = ["protein structure", "structural alignment", "TM-score", "US-align", "dendrogram", "clustering"]
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
     "Topic :: Scientific/Engineering :: Bio-Informatics",

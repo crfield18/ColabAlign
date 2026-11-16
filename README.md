@@ -70,7 +70,7 @@ if __name__ == '__main__':
     ColabAlign(inputs=['structures/'], output='results_dir', cores=8, threshold=[0.2, 0.3]).run()
 ```
 
-Keep the `if __name__ == '__main__':` guard in scripts. ColabAlign runs work in separate processes, and on Python 3.14 (Linux and macOS) those processes import the calling script, so an unguarded call would start the run again inside each worker and fail. The command line, `python -m colabalign` and notebooks need no guard.
+Keep the `if __name__ == '__main__':` guard in scripts. ColabAlign runs work in separate processes, and on every supported Python version (3.12 or newer, Linux and macOS) those processes import the calling script, so an unguarded call would start the run again inside each worker and fail. The command line, `python -m colabalign` and notebooks need no guard.
 
 ---
 

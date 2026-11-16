@@ -1,4 +1,3 @@
-include DEPENDENCIES.md
 include colabalign.yml
 include references.bib
 recursive-include locks *.lock *.txt
