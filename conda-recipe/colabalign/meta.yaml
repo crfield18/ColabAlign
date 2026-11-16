@@ -24,12 +24,12 @@ requirements:
   # package would only install into the reference environment. Lower bounds are
   # the tested versions; locks/ holds the exact reproducible environments.
   host:
-    - python >=3.14
+    - python >=3.12
     - pip
     - setuptools >=77
     - wheel
   run:
-    - python >=3.14
+    - python >=3.12
     - numpy >=2.5,<3
     - pandas >=3.1,<4
     - biopython >=1.88,<2

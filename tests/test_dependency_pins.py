@@ -57,8 +57,11 @@ def test_python_dependency_pins_match_conda():
     assert _python_pins(_tooling_specs(project)).items() <= env.items()
     for name, specifier in _python_ranges(project["project"]["dependencies"]).items():
         assert Version(env[name]) in SpecifierSet(specifier), (name, specifier, env[name])
-    assert project["project"]["requires-python"] == ">=3.14"
+    assert project["project"]["requires-python"] == ">=3.12"
+    # The reference environment stays on 3.14; 3.12 is the oldest version
+    # supported by the numpy and scipy lower bounds.
     assert env["python"].startswith("3.14.")
+    assert Version(env["python"]) in SpecifierSet(project["project"]["requires-python"])
 
 
 def _recipe_requirements(path):
@@ -138,3 +141,17 @@ def test_explicit_locks_have_hashes_and_match_all_direct_pins():
             name, version, _build = filename.rsplit("-", 2)
             resolved[name] = version
         assert env.items() <= resolved.items()
+
+
+def test_worker_pools_avoid_fork():
+    """Python 3.12 and 3.13 default to fork() on Linux; ColabAlign must not."""
+    import sys
+
+    from colabalign.common import process_context
+
+    expected = "spawn" if sys.platform == "darwin" else "forkserver"
+    assert process_context().get_start_method() == expected
+    for module in ("usalign_runner", "structure_prep", "consensus"):
+        source = (ROOT / "colabalign" / f"{module}.py").read_text(encoding="utf-8")
+        pools = re.findall(r"ProcessPoolExecutor\((.*?)\)\s+as\b", source, re.DOTALL)
+        assert pools and all("mp_context=process_context()" in args for args in pools), module

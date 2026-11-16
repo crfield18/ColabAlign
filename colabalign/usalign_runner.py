@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm as tqdm_auto
 
-from .common import count_residues
+from .common import count_residues, process_context
 from .pair_store import PairStore, file_hash
 
 USALIGN_OPTS = ('-do', '-m', '-', '-het', '2')  # -het 2: also align MSE (see common.py)
@@ -452,8 +452,8 @@ def run_pairwise_alignments(model_list, usalign_path, cores, cache_dir,
     ctx = {'paths': paths, 'stems': stems, 'store': store, 'usalign': str(usalign_path),
            'list_mode_max_residues': list_mode_max_residues}
 
-    with ProcessPoolExecutor(max_workers=cores, initializer=_init_worker,
-                             initargs=(ctx,)) as executor:
+    with ProcessPoolExecutor(max_workers=cores, mp_context=process_context(),
+                             initializer=_init_worker, initargs=(ctx,)) as executor:
         pending_tiles = iter(tiles)
         in_flight = {}
 

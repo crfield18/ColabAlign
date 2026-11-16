@@ -10,7 +10,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from Bio.PDB import PDBParser, PDBIO
 from tqdm.auto import tqdm as tqdm_auto
 
-from .common import file_contains_protein, chunks
+from .common import file_contains_protein, chunks, process_context
 
 
 STRUCTURE_SUFFIXES = ('.pdb', '.cif')
@@ -218,7 +218,7 @@ def _copy_and_convert_models(model_list, models_path: Path, beem_path: Path, cor
                            unit=' structure', dynamic_ncols=True, leave=True)
 
     failed = []
-    with ProcessPoolExecutor(max_workers=cores) as executor:
+    with ProcessPoolExecutor(max_workers=cores, mp_context=process_context()) as executor:
         futures = [executor.submit(_prepare_job, beem_path, models_path, job) for job in jobs]
 
         for future in as_completed(futures):

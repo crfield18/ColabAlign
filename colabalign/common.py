@@ -1,6 +1,9 @@
 '''Shared constants and PDB parsing utilities, used by both structure_prep.py
 and consensus.py so they can't silently drift apart from each other.'''
 
+import multiprocessing
+import sys
+
 AA_STANDARD = {
     'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
     'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL',
@@ -18,6 +21,17 @@ THREE_TO_ONE = {
     'SER': 'S', 'THR': 'T', 'TRP': 'W', 'TYR': 'Y', 'VAL': 'V',
     'MSE': 'M',
 }
+
+def process_context():
+    '''Multiprocessing context for every ColabAlign worker pool.
+
+    Python 3.12 and 3.13 default to fork() on Linux, which is unsafe once the
+    progress-bar monitor thread is running and raises a DeprecationWarning.
+    Use forkserver there, matching the Python 3.14 default, and keep spawn on
+    macOS, which has been its default since Python 3.8. Every supported
+    version then starts workers the same way.'''
+    return multiprocessing.get_context('spawn' if sys.platform == 'darwin' else 'forkserver')
+
 
 def chunks(lst, n):
     '''Yield n roughly-equal chunks from the list, for distributing work
