@@ -5,7 +5,7 @@ channels:
   - nodefaults
 dependencies:
 # Release reference interpreter, Python libraries and build/test tools
-  - python=3.12.16
+  - python=3.14.10
   - pip=26.2.2
   - setuptools=84.2.1
   - wheel=0.48.0

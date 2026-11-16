@@ -21,12 +21,12 @@ build:
 
 requirements:
   host:
-    - python =3.12.16
+    - python =3.14.10
     - pip =26.2.2
     - setuptools =84.2.1
     - wheel =0.48.0
   run:
-    - python =3.12.16
+    - python =3.14.10
     - numpy =2.5.4
     - pandas =3.1.1
     - biopython =1.88
