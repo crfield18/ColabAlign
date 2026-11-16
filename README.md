@@ -99,6 +99,7 @@ BibTeX-formatted references for this project and the associated references can b
 - **ColabAlign (paper)**: <https://doi.org/10.1101/2025.10.06.677802>
 - **ColabAlign (code only)**: <https://doi.org/10.5281/ZENODO.14169501>
 - **BioPython**: <https://doi.org/10.1093/bioinformatics/btp163>
+- **SciPy**: <https://doi.org/10.1038/s41592-019-0686-2> <!-- TEMPORARY: pending confirmation before merge (PR #3) -->
 - **US-align**: <https://doi.org/10.1038/s41592-022-01585-1>
 - **TreeCluster**: <https://doi.org/10.1371/journal.pone.0221068>
 - **MView**: <https://doi.org/10.1093/bioinformatics/14.4.380>
