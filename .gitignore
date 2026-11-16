@@ -5,3 +5,4 @@ build/
 dist/
 *.patch
 .pytest_cache
+benchmarks/*
