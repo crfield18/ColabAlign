@@ -1,5 +1,5 @@
 {% set name = "colabalign" %}
-{% set version = "1.2.0" %}
+{% set version = "1.2.3" %}
 
 package:
   name: {{ name }}
@@ -114,7 +114,8 @@ about:
     alignments of protein chains, builds a UPGMA structural dendrogram from
     the TM-score matrix, clusters it with TreeCluster at one or more
     thresholds, superposes each cluster onto its medoid, and picks a
-    consensus representative per cluster. Accepts .pdb, .cif and .zip inputs.
+    consensus representative per cluster. Accepts .pdb and .cif files, and
+    .zip or tar (.tar, .tar.gz/.tgz, .tar.bz2, .tar.xz) archives of them.
   dev_url: https://github.com/crfield18/ColabAlign
   doc_url: https://github.com/crfield18/ColabAlign/blob/v{{ version }}/README.md
 
