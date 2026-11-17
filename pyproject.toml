@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "colabalign"
-version = "1.2.0"
+version = "1.2.3"
 description = "All-vs-all US-align protein structure comparison, structural dendrograms, clustering and cluster-representative selection."
 readme = "README.md"
 license = "MIT"
