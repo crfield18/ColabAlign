@@ -6,8 +6,8 @@ package:
   version: {{ version }}
 
 source:
-  url: https://github.com/crfield18/ColabAlign/archive/v{{ version }}.tar.gz
-  sha256: 8985c548309c17aeb95236ceabf0194ad266629912b0d599f26a86b785d4c5ad
+  url: https://github.com/crfield18/ColabAlign/archive/refs/tags/v{{ version }}.tar.gz
+  sha256: bfafda27fb0911564598dd77a4b45199c5e058ffe42bda9df6437ae43e0c444a
 
 build:
   number: 0
