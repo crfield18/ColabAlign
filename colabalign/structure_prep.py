@@ -300,15 +300,19 @@ def _safe_copy_destination(dst: Path, src: Path) -> Path:
         counter += 1
 
 
-def _safe_move(src: Path, dst: Path):
-    '''Move src to dst, redirecting to a non-clobbering path if dst already exists.'''
+def _safe_move(src: Path, dst: Path) -> Path:
+    '''Move src to dst, redirecting to a non-clobbering path if dst already exists.
+    Returns the path the file ended up at.'''
     dst = _safe_copy_destination(dst, src)
     if dst != src:
         shutil.move(str(src), str(dst))
+    return dst
 
 
 def split_chains_to_pdb(models_path: Path, model: Path):
-    '''Split a native PDB file into one file per chain using biopython.'''
+    '''Split a native PDB file into one file per chain using biopython.
+    Returns the names of the chain files written (or already in place).'''
+    written = []
     parser = PDBParser(QUIET=True)
     io = PDBIO()
     structure = parser.get_structure(model.stem, model)
@@ -327,15 +331,18 @@ def split_chains_to_pdb(models_path: Path, model: Path):
             tmp_path.unlink()  # identical file already in place
         else:
             tmp_path.rename(final_path)
+        written.append(final_path.name)
+    return written
 
 
 def _prepare_one_model(beem_path: Path, models_path: Path, model: Path):
     '''
     Convert/copy a single input model into single-chain PDB file(s) under
     models_path. Runs inside a worker process.
-    Never raises - returns (model_stem, error_or_None) so that one bad
-    input can't take down the rest of its chunk.
+    Never raises - returns (model, error_or_None, [chain file names]) so
+    that one bad input can't take down the rest of its chunk.
     '''
+    outputs = []
     try:
         if model.suffix.lower() == '.cif':
             # Private working dir per call: BeEM writes into its cwd, and
@@ -345,16 +352,17 @@ def _prepare_one_model(beem_path: Path, models_path: Path, model: Path):
                 stdout, stderr = _run_beem(beem_path, model, work_dir)
                 beem_models = [item for item in stdout.decode(errors='ignore').split('\n') if item]
                 if not beem_models:
-                    return model.stem, f'BeEM produced no output (stderr: {stderr.decode(errors="ignore")})'
+                    return model, f'BeEM produced no output (stderr: {stderr.decode(errors="ignore")})', []
                 for m in beem_models:
-                    _safe_move(work_dir.joinpath(m), models_path.joinpath(Path(m).name))
+                    dst = _safe_move(work_dir.joinpath(m), models_path.joinpath(Path(m).name))
+                    outputs.append(dst.name)
         else:
-            split_chains_to_pdb(models_path, model)
+            outputs = split_chains_to_pdb(models_path, model)
     except Exception as e:  # pylint: disable=broad-exception-caught
         # any failure (subprocess, parsing, etc.) is reported as a failed
         # model rather than crashing the whole chunk
-        return model.stem, f'{type(e).__name__}: {e}'
-    return model.stem, None
+        return model, f'{type(e).__name__}: {e}', outputs
+    return model, None, outputs
 
 
 def _prepare_job(beem_path: Path, models_path: Path, models_chunk):
@@ -367,6 +375,7 @@ def _copy_and_convert_models(model_list, models_path: Path, beem_path: Path, cor
     Get the full list of input models up front, split it into per-core
     chunks, and run BeEM conversion / chain splitting for each chunk in
     a separate worker process.
+    Returns {input model path: [chain file names it produced]}.
     '''
     chunk_count = min(int(cores), len(model_list)) or 1
     jobs = list(chunks(model_list, chunk_count))
@@ -375,6 +384,7 @@ def _copy_and_convert_models(model_list, models_path: Path, beem_path: Path, cor
                            unit=' structure', dynamic_ncols=True, leave=True)
 
     failed = []
+    outputs_by_model = {}
     with ProcessPoolExecutor(max_workers=cores, mp_context=process_context()) as executor:
         futures = [executor.submit(_prepare_job, beem_path, models_path, job) for job in jobs]
 
@@ -386,10 +396,11 @@ def _copy_and_convert_models(model_list, models_path: Path, beem_path: Path, cor
                 print(f'Chunk-level error (entire chunk lost): {e}')
                 continue
 
-            for model_stem, error in results:
+            for model, error, outputs in results:
                 total_bar.update(1)
+                outputs_by_model[model] = outputs
                 if error is not None:
-                    failed.append((model_stem, error))
+                    failed.append((model.stem, error))
 
     total_bar.close()
 
@@ -397,6 +408,7 @@ def _copy_and_convert_models(model_list, models_path: Path, beem_path: Path, cor
         print(f'\n{len(failed)} input structure(s) failed during preparation and were skipped:')
         for stem, err in failed:
             print(f'  {stem}: {err}')
+    return outputs_by_model
 
 
 def prepare_models(model_list, models_path: Path, beem_path: Path, mode: str, cores: int = 1):
@@ -404,10 +416,20 @@ def prepare_models(model_list, models_path: Path, beem_path: Path, mode: str, co
     Copy/convert input structures into single-chain PDB files under models_path.
     Returns the final, filtered list of PDB files to align.
     '''
+    return prepare_models_with_chains(model_list, models_path, beem_path, mode, cores)[0]
+
+
+def prepare_models_with_chains(model_list, models_path: Path, beem_path: Path, mode: str,
+                               cores: int = 1):
+    '''
+    prepare_models(), also returning {input file name: [aligned chain labels]}
+    where a label is the chain file stem used in the score matrix, tree and
+    clusters (e.g. ranked_0_dup1A). Inputs with no surviving chains map to [].
+    '''
     print('Copying pdb files and converting .cif files to .pdb.')
     original_stems = {m.stem for m in model_list}
 
-    _copy_and_convert_models(model_list, models_path, beem_path, cores)
+    outputs_by_model = _copy_and_convert_models(model_list, models_path, beem_path, cores)
 
     # Drop empty or non-protein files - US-align does not handle them properly.
     for structure_file in models_path.glob('*.pdb'):
@@ -434,4 +456,37 @@ def prepare_models(model_list, models_path: Path, beem_path: Path, mode: str, co
                 model.unlink()
         final_model_list = first_chains
 
-    return final_model_list
+    kept = {m.name for m in final_model_list}
+    chains_by_input = {
+        model.name: sorted(Path(n).stem for n in outputs_by_model.get(model, []) if n in kept)
+        for model in model_list
+    }
+    return final_model_list, chains_by_input
+
+
+def expand_duplicate_rows(rows, chains_by_input):
+    '''
+    Turn the per-file duplicate rows from collect_input_models() into one row
+    per aligned chain, so name_in_colabalign matches the score matrix, tree
+    and cluster labels (ranked_0_dup1A, ranked_0_dup1B, ...). identical_to
+    points at the same chain of the earlier identical file. An input that
+    produced no alignable chain keeps a single row with a blank
+    name_in_colabalign.
+    '''
+    stem_of = {r['name_in_colabalign']: Path(r['name_in_colabalign']).stem for r in rows}
+    expanded = []
+    for row in rows:
+        own_stem = stem_of[row['name_in_colabalign']]
+        chains = chains_by_input.get(row['name_in_colabalign'], [])
+        if not chains:
+            expanded.append({**row, 'name_in_colabalign': '', 'identical_to': ''})
+            continue
+        earlier = row['identical_to']
+        earlier_chains = set(chains_by_input.get(earlier, []))
+        for label in chains:
+            match = ''
+            if earlier:
+                candidate = stem_of[earlier] + label[len(own_stem):]
+                match = candidate if candidate in earlier_chains else ''
+            expanded.append({**row, 'name_in_colabalign': label, 'identical_to': match})
+    return expanded

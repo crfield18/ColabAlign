@@ -74,15 +74,15 @@ if __name__ == '__main__':
 
 Every structure needs a unique name (ignoring case and extension, so `model.pdb` and `MODEL.cif` clash). When two inputs share a name, for example `ranked_0.pdb` from several AlphaFold runs, the first one found keeps its name and later ones are aligned as `ranked_0_dup1`, `ranked_0_dup2`, and so on. Loose files are taken first, in the order given to `-i` (directory contents in alphabetical order), then archive contents. Your original files are never renamed. ColabAlign works on renamed copies that are deleted once preparation finishes.
 
-Each run writes `results/duplicates.csv`, which lists every file in a clashing group, including the one that kept its name:
+Each run writes `results/duplicates.csv`, which lists every file in a clashing group, including the one that kept its name. Files are split into chains before alignment, so there is one row per aligned chain, and `name_in_colabalign` matches the score matrix, tree and cluster labels:
 
 | column | meaning |
 |---|---|
 | `input_file_name` | original file name |
 | `input_file_path` | absolute path, or `<archive path>:<path inside archive>` for archived files |
-| `name_in_colabalign` | name used in the run. Score matrix, tree and cluster labels add the chain ID (`ranked_0_dup1A`) |
-| `sha256` | hash of the file contents |
-| `identical_to` | if this file is byte-identical to an earlier file in the group, that file's `name_in_colabalign` |
+| `name_in_colabalign` | chain label used in the run, e.g. `ranked_0_dup1A`, `ranked_0_dup1B`. Blank if the file produced no alignable protein chain |
+| `sha256` | hash of the whole input file |
+| `identical_to` | if this file is byte-identical to an earlier file in the group, the matching chain label from that file |
 
 The CSV only has its header row when there were no clashes.
 

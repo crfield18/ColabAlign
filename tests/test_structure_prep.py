@@ -9,6 +9,7 @@ import csv
 
 from colabalign.structure_prep import (
     collect_input_models, discover_input_models, write_duplicates_csv, DUPLICATES_CSV_COLUMNS,
+    expand_duplicate_rows, prepare_models_with_chains,
 )
 from conftest import make_ca_trace, write_pdb
 
@@ -238,3 +239,43 @@ def test_safe_copy_destination_uses_content_not_size(tmp_path):
     diff.write_text(PDB_B)
     assert _safe_copy_destination(dst, same) == dst
     assert _safe_copy_destination(dst, diff) == tmp_path / 'm_dup1.pdb'
+
+
+def _two_chain_pdb(dx=0.0):
+    lines = []
+    for chain in 'AB':
+        for i in range(1, 4):
+            lines.append(f'ATOM  {i:5d}  CA  ALA {chain}{i:4d}    '
+                         f'{i * 3.8 + dx:8.3f}{0:8.3f}{0:8.3f}  1.00  0.00           C')
+        lines.append('TER')
+    return '\n'.join(lines) + '\nEND\n'
+
+
+@pytest.mark.parametrize('mode, expected', [
+    ('all', [('ranked_0A', ''), ('ranked_0B', ''), ('ranked_0_dup1A', ''),
+             ('ranked_0_dup1B', ''), ('ranked_0_dup2A', 'ranked_0A'),
+             ('ranked_0_dup2B', 'ranked_0B')]),
+    ('first', [('ranked_0A', ''), ('ranked_0_dup1A', ''), ('ranked_0_dup2A', 'ranked_0A')]),
+])
+def test_duplicate_rows_use_chain_labels_after_splitting(tmp_path, mode, expected):
+    for sub, dx in (('r1', 0.0), ('r2', 1.0), ('r3', 0.0)):
+        (tmp_path / sub).mkdir()
+        (tmp_path / sub / 'ranked_0.pdb').write_text(_two_chain_pdb(dx))
+    models, rows = collect_input_models(
+        [tmp_path / 'r1', tmp_path / 'r2', tmp_path / 'r3'], tmp_path / 'extract')
+    out = tmp_path / 'models'
+    out.mkdir()
+    final, chains = prepare_models_with_chains(models, out, tmp_path / 'no_beem', mode, 1)
+    expanded = expand_duplicate_rows(rows, chains)
+    assert [(r['name_in_colabalign'], r['identical_to']) for r in expanded] == expected
+    assert {r['name_in_colabalign'] for r in expanded} == {p.stem for p in final}
+
+
+def test_duplicate_row_without_chains_is_kept_blank():
+    rows = [{'input_file_name': 'x.pdb', 'input_file_path': '/a/x.pdb',
+             'name_in_colabalign': 'x.pdb', 'sha256': 'h', 'identical_to': ''},
+            {'input_file_name': 'x.pdb', 'input_file_path': '/b/x.pdb',
+             'name_in_colabalign': 'x_dup1.pdb', 'sha256': 'h', 'identical_to': 'x.pdb'}]
+    expanded = expand_duplicate_rows(rows, {'x.pdb': ['xA'], 'x_dup1.pdb': []})
+    assert [(r['name_in_colabalign'], r['identical_to']) for r in expanded] == [
+        ('xA', ''), ('', '')]

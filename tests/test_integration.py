@@ -190,7 +190,8 @@ def test_end_to_end_duplicate_names(tmp_path, usalign, treecluster, beem):  # py
     with open(results / 'duplicates.csv', newline='', encoding='utf-8') as f:
         rows = list(csv.DictReader(f))
     assert [r['name_in_colabalign'] for r in rows] == [
-        'ranked_0.pdb', 'ranked_0_dup1.pdb', 'ranked_0_dup2.pdb']
+        'ranked_0A', 'ranked_0_dup1A', 'ranked_0_dup2A']
+    assert {r['name_in_colabalign'] for r in rows} <= set(tm.index)
     assert rows[2]['input_file_path'].endswith('run3.tar.gz:ranked_0.pdb')
     assert {p: p.read_bytes() for p in originals} == originals
     assert not (out / '.extracted_inputs').exists()

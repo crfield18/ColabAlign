@@ -8,7 +8,9 @@ from pathlib import Path
 from time import time
 
 from .cli import script_args
-from .structure_prep import collect_input_models, prepare_models, write_duplicates_csv
+from .structure_prep import (
+    collect_input_models, expand_duplicate_rows, prepare_models_with_chains, write_duplicates_csv,
+)
 from .usalign_runner import run_pairwise_alignments, check_tm_matrix_completeness
 from .dendrogram import grow_tree as _grow_tree, tree_clustering as _tree_clustering
 from .consensus import ClusterConsensus
@@ -100,15 +102,17 @@ class ColabAlign:
 
     def prepare_structures(self):
         '''Prepare input models (e.g. chain extraction, format conversion) for alignment.'''
+        n_renamed = sum(r['name_in_colabalign'] != r['input_file_name']
+                        for r in self.duplicate_rows)
+        self.model_list, chains_by_input = prepare_models_with_chains(
+            self.model_list, self.models_path, self.beem_path, self.mode, self.cores)
+        # Written after chain splitting so names match the matrix/tree labels.
         duplicates_csv = self.results_path.joinpath('duplicates.csv')
-        write_duplicates_csv(self.duplicate_rows, duplicates_csv)
+        write_duplicates_csv(expand_duplicate_rows(self.duplicate_rows, chains_by_input),
+                             duplicates_csv)
         if self.duplicate_rows:
-            n_renamed = sum(r['name_in_colabalign'] != r['input_file_name']
-                            for r in self.duplicate_rows)
             print(f'{n_renamed} input file(s) shared a name with another input and were '
                   f'given a _dupN name in ColabAlign. See {duplicates_csv}.')
-        self.model_list = prepare_models(
-            self.model_list, self.models_path, self.beem_path, self.mode, self.cores)
         shutil.rmtree(self.extract_path, ignore_errors=True)
 
     def pairwise_alignment(self):
