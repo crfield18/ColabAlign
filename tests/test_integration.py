@@ -153,3 +153,45 @@ def test_end_to_end_with_zip_and_cif(tmp_path, usalign, treecluster, beem):  # p
     reps = list(results.rglob('*representatives*'))
     assert reps and all(r.stat().st_size > 0 for r in reps)
     assert list(results.rglob('*_consensus.afasta'))
+
+
+def test_end_to_end_duplicate_names(tmp_path, usalign, treecluster, beem):  # pylint: disable=unused-argument
+    import csv
+    import io
+    import tarfile
+    from colabalign.pipeline import main
+    from conftest import make_structure_set
+
+    src = make_structure_set(tmp_path / 'src')
+    indir = tmp_path / 'in'
+    (indir / 'run1').mkdir(parents=True)
+    (indir / 'run2').mkdir()
+    # Three different structures that are all called ranked_0.pdb.
+    (indir / 'run1' / 'ranked_0.pdb').write_bytes(src[0].read_bytes())
+    (indir / 'run2' / 'ranked_0.pdb').write_bytes(src[1].read_bytes())
+    with tarfile.open(indir / 'run3.tar.gz', 'w:gz') as t:
+        data = src[2].read_bytes()
+        info = tarfile.TarInfo('ranked_0.pdb')
+        info.size = len(data)
+        t.addfile(info, io.BytesIO(data))
+    for p in src[3:]:
+        (indir / p.name).write_bytes(p.read_bytes())
+    originals = {p: p.read_bytes() for p in indir.rglob('*') if p.is_file()}
+
+    out = tmp_path / 'out'
+    main(['-i', str(indir / 'run1'), str(indir / 'run2'), str(indir / 'run3.tar.gz'),
+          *[str(indir / p.name) for p in src[3:]],
+          '-o', str(out), '-c', '2', '-t', '0.3', '-u', usalign, '-b', beem, '-m', 'first'])
+
+    results = out / 'results'
+    tm = pd.read_csv(results / 'us-align_score_matrix.csv', index_col=0)
+    assert len(tm) == len(src)
+    assert {'ranked_0A', 'ranked_0_dup1A', 'ranked_0_dup2A'} <= set(tm.index)
+    with open(results / 'duplicates.csv', newline='', encoding='utf-8') as f:
+        rows = list(csv.DictReader(f))
+    assert [r['name_in_colabalign'] for r in rows] == [
+        'ranked_0A', 'ranked_0_dup1A', 'ranked_0_dup2A']
+    assert {r['name_in_colabalign'] for r in rows} <= set(tm.index)
+    assert rows[2]['input_file_path'].endswith('run3.tar.gz:ranked_0.pdb')
+    assert {p: p.read_bytes() for p in originals} == originals
+    assert not (out / '.extracted_inputs').exists()

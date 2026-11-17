@@ -8,7 +8,9 @@ from pathlib import Path
 from time import time
 
 from .cli import script_args
-from .structure_prep import discover_input_models, prepare_models
+from .structure_prep import (
+    collect_input_models, expand_duplicate_rows, prepare_models_with_chains, write_duplicates_csv,
+)
 from .usalign_runner import run_pairwise_alignments, check_tm_matrix_completeness
 from .dendrogram import grow_tree as _grow_tree, tree_clustering as _tree_clustering
 from .consensus import ClusterConsensus
@@ -35,7 +37,7 @@ class ColabAlign:
         '''
         Set up output directories and runtime parameters.
 
-        inputs: iterable of .pdb/.cif files, directories, or .zip archives.
+        inputs: iterable of .pdb/.cif files, directories, or .zip/.tar(.gz) archives.
         output: output directory (created if missing).
         threshold: one clustering threshold or an iterable of them.
         mode: 'all' chains or only the 'first' chain of each input.
@@ -65,12 +67,12 @@ class ColabAlign:
         ):
             Path.mkdir(output_subdir, exist_ok=True, parents=True)
 
-        # Temporary home for the contents of any uploaded .zip archives;
+        # Temporary home for the contents of any uploaded .zip/.tar archives;
         # removed once structure preparation has finished with them.
         self.extract_path = self.home_path.joinpath('.extracted_inputs')
-        self.model_list = discover_input_models(args.input, self.extract_path)
+        self.model_list, self.duplicate_rows = collect_input_models(args.input, self.extract_path)
         if not self.model_list:
-            raise SystemExit('No .pdb, .cif or .zip input files found.')
+            raise SystemExit('No .pdb, .cif, .zip or .tar(.gz) input files found.')
 
         self.cores = args.cores
         if self.cores <= 0:
@@ -100,8 +102,17 @@ class ColabAlign:
 
     def prepare_structures(self):
         '''Prepare input models (e.g. chain extraction, format conversion) for alignment.'''
-        self.model_list = prepare_models(
+        n_renamed = sum(r['name_in_colabalign'] != r['input_file_name']
+                        for r in self.duplicate_rows)
+        self.model_list, chains_by_input = prepare_models_with_chains(
             self.model_list, self.models_path, self.beem_path, self.mode, self.cores)
+        # Written after chain splitting so names match the matrix/tree labels.
+        duplicates_csv = self.results_path.joinpath('duplicates.csv')
+        write_duplicates_csv(expand_duplicate_rows(self.duplicate_rows, chains_by_input),
+                             duplicates_csv)
+        if self.duplicate_rows:
+            print(f'{n_renamed} input file(s) shared a name with another input and were '
+                  f'given a _dupN name in ColabAlign. See {duplicates_csv}.')
         shutil.rmtree(self.extract_path, ignore_errors=True)
 
     def pairwise_alignment(self):

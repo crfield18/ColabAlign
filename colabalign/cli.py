@@ -26,7 +26,7 @@ def build_parser() -> ArgumentParser:
         required=True,
         nargs='+',
         metavar='PATH',
-        help='Path(s) to input .pdb/.cif files, directories of them, or .zip archives.'
+        help='Path(s) to input .pdb/.cif files, directories of them, or .zip/.tar(.gz) archives.'
     )
     parser.add_argument(
         '-o', '--output',
@@ -39,9 +39,9 @@ def build_parser() -> ArgumentParser:
         '-c', '--cores',
         type=int,
         required=False,
-        default=1,
+        default=2,
         metavar='INTEGER',
-        help='Number of CPU cores to use (Default = 1).'
+        help='Number of CPU cores to use (Default = 2).'
     )
     parser.add_argument(
         '-t', '--threshold',

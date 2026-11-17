@@ -2,7 +2,7 @@
 
 ## Fast pairwise protein secondary structure comparisons using multiprocessing
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/crfield18/ColabAlign/blob/main/colabalign.ipynb) [![Code DOI](https://img.shields.io/badge/DOI-10.5281/zenodo.14169501-blue)](https://doi.org/10.5281/zenodo.14169501) [![Paper DOI](https://img.shields.io/badge/DOI-10.1101/2025.10.06.677802-green)](https://doi.org/10.1101/2025.10.06.677802)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/crfield18/ColabAlign/blob/archive-support/colabalign.ipynb) [![Code DOI](https://img.shields.io/badge/DOI-10.5281/zenodo.14169501-blue)](https://doi.org/10.5281/zenodo.14169501) [![Paper DOI](https://img.shields.io/badge/DOI-10.1101/2025.10.06.677802-green)](https://doi.org/10.1101/2025.10.06.677802)
 
 This notebook performs pairwise protein structural alignments using the [US-align](https://zhanggroup.org/US-align/) algorithm by [Zhang _et al._, (2022)](https://doi.org/10.1038/s41592-022-01585-1), then constructs a structure-informed dendrogram using the UPGMA algorithm to visualise similarities.
 
@@ -58,10 +58,10 @@ python -m pip install --no-deps --no-build-isolation .
 ### Usage
 
 ```
-colabalign -i structures/ more.zip extra.pdb -o results_dir -c 8 -t 0.20 0.30 -m first
+colabalign -i structures/ more.zip runs.tar.gz extra.pdb -o results_dir -c 8 -t 0.20 0.30 -m first
 ```
 
-`-i` accepts `.pdb`/`.cif` files, directories of them, and `.zip` archives. `python -m colabalign` works too. From Python:
+`-i` accepts `.pdb`/`.cif` files, directories of them, and `.zip` or tar archives (`.tar`, `.tar.gz`/`.tgz`, `.tar.bz2`, `.tar.xz`). `python -m colabalign` works too. From Python:
 
 ```python
 from colabalign import ColabAlign
@@ -69,6 +69,22 @@ from colabalign import ColabAlign
 if __name__ == '__main__':
     ColabAlign(inputs=['structures/'], output='results_dir', cores=8, threshold=[0.2, 0.3]).run()
 ```
+
+#### Inputs with the same name
+
+Every structure needs a unique name (ignoring case and extension, so `model.pdb` and `MODEL.cif` clash). When two inputs share a name, for example `ranked_0.pdb` from several AlphaFold runs, the first one found keeps its name and later ones are aligned as `ranked_0_dup1`, `ranked_0_dup2`, and so on. Loose files are taken first, in the order given to `-i` (directory contents in alphabetical order), then archive contents. Your original files are never renamed. ColabAlign works on renamed copies that are deleted once preparation finishes.
+
+Each run writes `results/duplicates.csv`, which lists every file in a clashing group, including the one that kept its name. Files are split into chains before alignment, so there is one row per aligned chain, and `name_in_colabalign` matches the score matrix, tree and cluster labels:
+
+| column | meaning |
+|---|---|
+| `input_file_name` | original file name |
+| `input_file_path` | absolute path, or `<archive path>:<path inside archive>` for archived files |
+| `name_in_colabalign` | chain label used in the run, e.g. `ranked_0_dup1A`, `ranked_0_dup1B`. Blank if the file produced no alignable protein chain |
+| `sha256` | hash of the whole input file |
+| `identical_to` | if this file is byte-identical to an earlier file in the group, the matching chain label from that file |
+
+The CSV only has its header row when there were no clashes.
 
 Keep the `if __name__ == '__main__':` guard in scripts. ColabAlign runs work in separate processes, and on every supported Python version (3.12 or newer, Linux and macOS) those processes import the calling script, so an unguarded call would start the run again inside each worker and fail. The command line, `python -m colabalign` and notebooks need no guard.
 
