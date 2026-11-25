@@ -2,7 +2,7 @@
 
 ## Fast pairwise protein secondary structure comparisons using multiprocessing
 
-[![GitHub license](https://badgen.net/github/license/Naereen/Strapdown.js)](https://github.com/crfield18/ColabAlign/blob/main/LICENSE)
+[![License](https://anaconda.org/bioconda/colabalign/badges/license.svg)](https://github.com/crfield18/ColabAlign/blob/main/LICENSE)
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/colabalign/badges/platforms.svg)](https://anaconda.org/bioconda/colabalign)
 [![Install with Bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](http://bioconda.github.io/recipes/colabalign/README.html)
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/crfield18/ColabAlign/blob/main/colabalign.ipynb)
