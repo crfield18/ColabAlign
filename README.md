@@ -2,9 +2,11 @@
 
 ## Fast pairwise protein secondary structure comparisons using multiprocessing
 
-[![Anaconda-Server Badge](https://anaconda.org/bioconda/colabalign/badges/platforms.svg)](https://anaconda.org/bioconda/colabalign) [![Install with Bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](http://bioconda.github.io/recipes/colabalign/README.html) [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/crfield18/ColabAlign/blob/main/colabalign.ipynb) 
-
-[![Code DOI](https://img.shields.io/badge/DOI-10.5281/zenodo.14169501-blue)](https://doi.org/10.5281/zenodo.14169501) [![Paper DOI](https://img.shields.io/badge/DOI-10.1101/2025.10.06.677802-green)](https://doi.org/10.1101/2025.10.06.677802)
+[![GitHub license](https://badgen.net/github/license/Naereen/Strapdown.js)](https://github.com/crfield18/ColabAlign/blob/main/LICENSE)
+[![Anaconda-Server Badge](https://anaconda.org/bioconda/colabalign/badges/platforms.svg)](https://anaconda.org/bioconda/colabalign)
+[![Install with Bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](http://bioconda.github.io/recipes/colabalign/README.html)
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/crfield18/ColabAlign/blob/main/colabalign.ipynb)
+[![Code DOI](https://img.shields.io/badge/DOI-10.5281/zenodo.14169501-yellow)](https://doi.org/10.5281/zenodo.14169501)
 
 This notebook performs pairwise protein structural alignments using the [US-align](https://zhanggroup.org/US-align/) algorithm by [Zhang _et al._, (2022)](https://doi.org/10.1038/s41592-022-01585-1), then constructs a structure-informed dendrogram using the UPGMA algorithm to visualise similarities.
 
