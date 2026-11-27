@@ -2,6 +2,7 @@
 
 from math import inf
 from pathlib import Path
+from shutil import copyfile
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -330,6 +331,20 @@ def _write_cluster_outputs(pdb_dir, cluster_num, threshold, aligned, consensus):
             f.write(f'{consensus[i:i+80]}\n')
 
 
+def _copy_cluster_outputs(source_dir, threshold, cluster_num, target_dir, target_threshold,
+                          target_num):  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    '''Copy an identical cluster's alignment and consensus under another threshold's names.'''
+    for suffix in ('.afasta', '_consensus.afasta'):
+        source = _cluster_file(source_dir, threshold, cluster_num, suffix)
+        if source.exists():
+            copyfile(source, _cluster_file(target_dir, target_threshold, target_num, suffix))
+
+
+def _cluster_file(pdb_dir, threshold, cluster_num, suffix):
+    '''Path of a per-cluster output file, e.g. threshold_0.20_cluster_3.afasta.'''
+    return Path(pdb_dir).joinpath(f'threshold_{threshold}_cluster_{cluster_num}{suffix}')
+
+
 # pylint: disable=too-many-arguments,too-many-positional-arguments
 def process_cluster(pdb_dir: Path, cluster_num, threshold, pair_store, sub_tmmatrix,
                     refine=True):
@@ -374,27 +389,41 @@ class ClusterConsensus:
         return jobs
 
     def _run_jobs(self, jobs):
-        '''Run cluster-processing jobs in a shared process pool and collect results.'''
+        '''Run cluster-processing jobs in a shared process pool and collect results.
+
+        Nearby thresholds share most of their clusters. Each distinct member set is
+        aligned once; its alignment files are copied to the other thresholds.'''
         representatives_by_threshold = {threshold_str: {} for threshold_str, *_ in jobs}
+        groups = {}
+        for job in jobs:
+            groups.setdefault(frozenset(job[3]), []).append(job)
 
         with ProcessPoolExecutor(max_workers=self.threads, mp_context=process_context()) as executor:
             total_bar = tqdm_auto(
-                total=len(jobs), desc='Total clusters',
+                total=len(groups), desc='Total clusters',
                 unit=' reps chosen', dynamic_ncols=True, leave=True,
             )
-            futures = []
-            for threshold_str, cluster_num, pdb_dir, member_names in jobs:
-                members = [m for m in member_names if m in self.tmmatrix.index]
+            futures = {}
+            for member_set, group in groups.items():
+                threshold_str, cluster_num, pdb_dir, _ = group[0]
+                members = [m for m in sorted(member_set) if m in self.tmmatrix.index]
                 sub_tmmatrix = self.tmmatrix.loc[members, members]
-                futures.append(executor.submit(
+                futures[executor.submit(
                     process_cluster, pdb_dir, cluster_num, threshold_str,
                     self.pair_store, sub_tmmatrix, self.refine,
-                ))
+                )] = group
             for future in as_completed(futures):
                 representative, cluster_num, threshold_str = future.result()
                 total_bar.update(1)
-                if representative is not None:
-                    representatives_by_threshold[threshold_str][int(cluster_num)] = representative
+                if representative is None:
+                    continue
+                group = futures[future]
+                source_dir = group[0][2]
+                for other_threshold, other_num, other_dir, _ in group:
+                    if (other_threshold, other_num) != (threshold_str, cluster_num):
+                        _copy_cluster_outputs(source_dir, threshold_str, cluster_num,
+                                              other_dir, other_threshold, other_num)
+                    representatives_by_threshold[other_threshold][int(other_num)] = representative
         total_bar.close()
 
         return representatives_by_threshold
@@ -417,9 +446,13 @@ class ClusterConsensus:
                     )
 
     def get_representatives_all_thresholds(self, results_path: Path, clusters_by_threshold: dict):
-        '''Run a single shared process pool across every threshold's clusters and write results.'''
+        '''Run a single shared process pool across every threshold's clusters, write the
+        results, and return dict[threshold_str -> dict[cluster_num -> representative]].'''
         jobs = self._collect_jobs(results_path, clusters_by_threshold)
         if not jobs:
-            return
+            return {threshold_str: {} for threshold_str in clusters_by_threshold}
         representatives_by_threshold = self._run_jobs(jobs)
         self._write_representatives(results_path, representatives_by_threshold)
+        for threshold_str in clusters_by_threshold:
+            representatives_by_threshold.setdefault(threshold_str, {})
+        return representatives_by_threshold

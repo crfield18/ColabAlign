@@ -195,3 +195,59 @@ def test_end_to_end_duplicate_names(tmp_path, usalign, treecluster, beem):  # py
     assert rows[2]['input_file_path'].endswith('run3.tar.gz:ranked_0.pdb')
     assert {p: p.read_bytes() for p in originals} == originals
     assert not (out / '.extracted_inputs').exists()
+
+
+def test_end_to_end_panel_sizes(tmp_path, usalign, treecluster):  # pylint: disable=unused-argument
+    import csv
+    from colabalign.pipeline import main
+    from conftest import make_structure_set
+
+    src = make_structure_set(tmp_path / 'in', per_family=4)
+    out = tmp_path / 'out'
+    main(['-i', str(tmp_path / 'in'), '-o', str(out), '-c', '2', '-n', '5', '3-8',
+          '-l', '0.2', '-u', usalign])
+
+    results = out / 'results'
+    with open(results / 'panel_sizes.csv', newline='', encoding='utf-8') as f:
+        sweep = list(csv.DictReader(f))
+    assert int(sweep[0]['clusters']) <= len(src) and sweep[-1]['clusters'] == '1'
+    requested = [r for r in sweep if r['requested']]
+    assert requested and all(r['threshold_used'] for r in requested)
+    assert any(3 <= int(r['panel_size']) <= 8 for r in requested)
+    # no default 0.20 run when only -n is given, unless the sweep chose it
+    with open(results / 'panels.csv', newline='', encoding='utf-8') as f:
+        panels = list(csv.DictReader(f))
+    assert {p['threshold'] for p in panels} == {r['threshold_used'] for r in requested}
+    names = set(pd.read_csv(results / 'us-align_score_matrix.csv', index_col=0).index)
+    assert len(names) == len(src)
+    for panel in panels:
+        with open(results / panel['panel_csv'], newline='', encoding='utf-8') as f:
+            rows = list(csv.DictReader(f))
+        members = [r['structure'] for r in rows]
+        assert len(members) == len(set(members)) == int(panel['panel_size'])
+        assert set(members) <= names
+        roles = [r['role'] for r in rows]
+        assert roles.count('low_coverage') == int(panel['low_coverage_additions'])
+        assert sum(int(r['structures_represented']) for r in rows) == len(src)
+        # every cluster directory has all its members, superposed or copied
+        tsv = pd.read_csv(results / 'clusters' / f"{panel['threshold']}.tsv", sep='\t')
+        for cluster, group in tsv.groupby('ClusterNumber'):
+            pdbs = {p.stem for p in (results / 'clusters' / panel['threshold'] / str(cluster))
+                    .glob('*.pdb')}
+            assert pdbs == set(group['SequenceName']), (panel['threshold'], cluster)
+        fasta = (results / panel['panel_csv']).with_suffix('.fasta').read_text()
+        assert fasta.count('>') == len(members)
+        assert float(panel['min_best_tm']) <= float(panel['mean_best_tm']) <= 1
+
+
+def test_end_to_end_default_threshold(tmp_path, usalign, treecluster):  # pylint: disable=unused-argument
+    from colabalign.pipeline import main
+    from conftest import make_structure_set
+
+    make_structure_set(tmp_path / 'in')
+    out = tmp_path / 'out'
+    main(['-i', str(tmp_path / 'in'), '-o', str(out), '-c', '2', '-u', usalign])
+    results = out / 'results'
+    assert (results / 'clusters' / '0.20.tsv').is_file()
+    assert (results / 'clusters' / '0.20' / 'threshold_0.20_panel.csv').is_file()
+    assert (results / 'panels.csv').is_file() and (results / 'panel_sizes.csv').is_file()

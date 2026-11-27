@@ -62,8 +62,12 @@ python -m pip install --no-deps --no-build-isolation .
 ### Usage
 
 ```
-colabalign -i structures/ more.zip runs.tar.gz extra.pdb -o results_dir -c 8 -t 0.20 0.30 -m first
+colabalign -i structures/ more.zip runs.tar.gz extra.pdb -o results_dir -c 8 -n 50 -m first
 ```
+
+`-n/--panel-size` is the number of structures you want to select. ColabAlign finds the clustering threshold that gives the closest achievable panel size. Not every size is possible, so the panel can be a little larger or smaller than requested. Give a range such as `-n 40-60` to get every achievable panel size in that range, or several values (`-n 30 50`). `results/panel_sizes.csv` lists every achievable size. You can still set thresholds directly with `-t 0.20 0.30`. With neither option, `-t 0.20` is used.
+
+By default 5 % of each panel is given to **low-coverage structures**: the structures with the lowest best TM-score to the panel, added one at a time. They catch outliers inside large clusters that the cluster representative does not cover well. Change the share with `-l/--low-coverage-fraction` (for example `-l 0.1`), or turn it off with `-l 0`. Each panel is written to `results/clusters/<t>/threshold_<t>_panel.csv` and `.fasta`, and `results/panels.csv` summarises them all. See the [manual](colabalign/MANUAL.md) for details.
 
 `-i` accepts `.pdb`/`.cif` files, directories of them, and `.zip` or tar archives (`.tar`, `.tar.gz`/`.tgz`, `.tar.bz2`, `.tar.xz`). `python -m colabalign` works too. From Python:
 
@@ -71,7 +75,7 @@ colabalign -i structures/ more.zip runs.tar.gz extra.pdb -o results_dir -c 8 -t 
 from colabalign import ColabAlign
 
 if __name__ == '__main__':
-    ColabAlign(inputs=['structures/'], output='results_dir', cores=8, threshold=[0.2, 0.3]).run()
+    ColabAlign(inputs=['structures/'], output='results_dir', cores=8, panel_size=['40-60']).run()
 ```
 
 #### Inputs with the same name

@@ -1,5 +1,6 @@
 '''Dendrogram construction, tree clustering, and per-cluster structural superposition.'''
 
+import hashlib
 from math import isnan
 from pathlib import Path
 from shutil import copy
@@ -10,6 +11,8 @@ import pandas as pd
 from Bio import Phylo
 from Bio.Phylo.TreeConstruction import DistanceTreeConstructor, DistanceMatrix
 from Bio.PDB import PDBParser, PDBIO
+
+from .panel import format_threshold
 
 
 
@@ -58,13 +61,32 @@ class StructureAligner:  # pylint: disable=too-few-public-methods
         return self.output_file
 
 
-def grow_tree(tmmatrix: pd.DataFrame, model_list, results_path: Path):
-    '''Build a UPGMA dendrogram from the TM-score matrix and write it as Newick.'''
-    print('Generating structural dendrogram.')
+def _tree_key(distances_df: pd.DataFrame, names) -> str:
+    '''Hash of exactly what the tree is built from: leaf names and rounded distances.'''
+    digest = hashlib.sha256()
+    digest.update('\n'.join(names).encode())
+    digest.update(np.ascontiguousarray(distances_df.to_numpy(dtype=np.float64)).tobytes())
+    return digest.hexdigest()
 
+
+def grow_tree(tmmatrix: pd.DataFrame, model_list, results_path: Path):
+    '''Build a UPGMA dendrogram from the TM-score matrix and write it as Newick.
+
+    The tree is reused when results/colabalign.tree was built from the same
+    names and distances, since Biopython's UPGMA is O(n^3) in pure Python.'''
     distances_df = 1.0000 - tmmatrix
     distances_df = distances_df.round(4)
     distances_df = distances_df.clip(lower=0.0000, upper=1.0000)
+
+    names = [model.stem for model in model_list]
+    tree_path = results_path.joinpath('colabalign.tree')
+    key_path = results_path.joinpath('colabalign.tree.sha256')
+    key = _tree_key(distances_df.loc[names, names], names)
+    if tree_path.is_file() and key_path.is_file() and key_path.read_text().strip() == key:
+        print(f'Reusing the existing dendrogram ({tree_path}): same structures and TM-scores.')
+        return
+    key_path.unlink(missing_ok=True)
+    print('Generating structural dendrogram.')
 
     lower_tri_df = distances_df.where(np.tril(np.ones(distances_df.shape)).astype(bool))
     lower_tri_lists = [
@@ -73,28 +95,30 @@ def grow_tree(tmmatrix: pd.DataFrame, model_list, results_path: Path):
     ]
 
     tm_matrix = DistanceMatrix(
-        names=[model.stem for model in model_list],
+        names=names,
         matrix=lower_tri_lists
     )
     constructor = DistanceTreeConstructor()
     tree = constructor.upgma(tm_matrix)
 
-    Phylo.write(tree, results_path.joinpath('colabalign.tree'), 'newick')
+    Phylo.write(tree, tree_path, 'newick')
+    key_path.write_text(key + '\n')
 
 
 def _run_treecluster(thresholds, results_path: Path):
     '''Run TreeCluster.py once per threshold, raising if any run fails.'''
     for thresh in thresholds:
+        threshold_str = format_threshold(thresh)
         cmd = [
             'TreeCluster.py',
             '-i', results_path.joinpath('colabalign.tree').as_posix(),
-            '-o', results_path.joinpath(f'clusters/{thresh:.2f}.tsv').as_posix(),
-            '-t', f'{thresh:.2f}'
+            '-o', results_path.joinpath(f'clusters/{threshold_str}.tsv').as_posix(),
+            '-t', threshold_str
         ]
         result = subprocess.run(cmd, capture_output=True, check=False)
         if result.returncode != 0:
             raise RuntimeError(
-                f'TreeCluster.py failed for threshold {thresh:.2f} '
+                f'TreeCluster.py failed for threshold {threshold_str} '
                 f'(exit {result.returncode}): {result.stderr.decode(errors="ignore")}'
             )
 
@@ -182,9 +206,8 @@ def tree_clustering(thresholds, results_path: Path, tmmatrix: pd.DataFrame,
                      pair_store, model_list, models_path: Path):
     '''
     Runs TreeCluster.py per threshold, superposes cluster members onto the
-    cluster's medoid (highest MEAN TM-score to the rest of the cluster,
-    not just the single highest pairwise TM-score), and returns
-    dict[threshold_str -> dict[cluster_num -> list of member stems]].
+    cluster's medoid (highest MEAN TM-score to the rest of the cluster), and 
+    returns dict[threshold_str -> dict[cluster_num -> list of member stems]].
     '''
     print('Calculating clusters from structural tree.')
 
@@ -193,15 +216,29 @@ def tree_clustering(thresholds, results_path: Path, tmmatrix: pd.DataFrame,
     ctx = (tmmatrix, pair_store, model_list, models_path)
     all_clusters_by_threshold = {}
 
+    # Nearby thresholds share most clusters. The medoid and superposition depend
+    # only on the members, so each distinct cluster is superposed once and its
+    # files are copied to the other thresholds.
+    done = {}
     for thresh in thresholds:
-        threshold_str = f'{thresh:.2f}'
+        threshold_str = format_threshold(thresh)
         clusters = _parse_cluster_file(results_path, threshold_str)
+        reused = 0
 
         for cluster_num, member_names in clusters.items():
             cluster_output_dir = results_path.joinpath(f'clusters/{threshold_str}/{cluster_num}')
             cluster_output_dir.mkdir(exist_ok=True, parents=True)
+            key = (cluster_num == -1, frozenset(member_names))
+            if cluster_num != -1 and key in done:
+                for source in done[key].glob('*.pdb'):
+                    copy(source, cluster_output_dir.joinpath(source.name))
+                reused += 1
+                continue
             _process_cluster(cluster_num, member_names, ctx, cluster_output_dir)
+            done[key] = cluster_output_dir
 
         all_clusters_by_threshold[threshold_str] = clusters
+        print(f'Threshold {threshold_str}: {len(clusters)} cluster groups'
+              + (f', {reused} reused from an earlier threshold.' if reused else '.'))
 
     return all_clusters_by_threshold

@@ -33,10 +33,11 @@ At a high level, ColabAlign:
 
 1. aligns every pair of structures with US-align [[4]](#ref-4) and records a TM-score;
 2. builds a dendrogram from the resulting distance matrix;
-3. cuts the dendrogram into clusters at one or more thresholds;
+3. cuts the dendrogram into clusters at one or more thresholds, given directly or chosen to give a requested panel size;
 4. superposes each cluster's members onto a central structure (the medoid);
 5. builds a structure-informed MSA for each cluster from the US-align residue correspondences;
-6. selects the sequence closest to the cluster consensus as the representative.
+6. selects the sequence closest to the cluster consensus as the representative;
+7. assembles a panel from the representatives and singletons, topped up with the structures the panel covers least well.
 
 All stages that can run in parallel are spread across CPU cores with `ProcessPoolExecutor`. This covers structure preparation, pairwise alignment and the per-cluster MSAs.
 
@@ -50,10 +51,12 @@ flowchart TD
     B --> C["Stage 2: All-vs-all US-align<br/>length-balanced tiles, on-disk PairStore"]
     C --> D["TM-score matrix T<br/>(symmetrised by max)"]
     D --> E["Stage 3: D = 1 − T<br/>average-linkage dendrogram (Biopython)"]
-    E --> F["Stage 4: TreeCluster max_clade<br/>one run per threshold t"]
+    E --> P["Panel-size sweep<br/>every achievable cluster count;<br/>t chosen for each -n size"]
+    P --> F["Stage 4: TreeCluster max_clade<br/>one run per threshold t"]
     F --> G["Stage 5: Superpose members<br/>onto cluster medoid"]
     G --> H["Stage 6: Progressive profile MSA<br/>from US-align residue library + refinement"]
     H --> I["Stage 7: Consensus (τ = 0.6)<br/>→ representative per cluster"]
+    I --> J["Panel: representatives + singletons<br/>+ low-coverage additions"]
 ```
 
 The code is organised as follows:
@@ -67,6 +70,7 @@ The code is organised as follows:
 | `pair_store.py` | On-disk, versioned cache of per-pair alignment results |
 | `dendrogram.py` | Tree construction, TreeCluster calls, medoid superposition |
 | `consensus.py` | Per-cluster MSA, refinement, consensus and representative selection |
+| `panel.py` | Panel-size sweep, threshold choice, low-coverage additions and panel files |
 | `common.py` | Shared residue tables, PDB sequence extraction, multiprocessing context |
 
 ---
@@ -300,6 +304,21 @@ The default $t = 0.20$ therefore corresponds to an average-linkage TM-score of a
 
 TreeCluster labels any leaf that ends up in a cluster of size one with **`-1`**, so cluster `-1` is the set of all singletons. The output for each threshold is written to `results/clusters/<t>.tsv`.
 
+### 6.1 Choosing $t$ from a panel size
+
+With `-n/--panel-size`, ColabAlign chooses $t$ itself. Each internal node $v$ of the tree has a diameter $\Delta_v$, the largest leaf-to-leaf distance within its clade, computed exactly as TreeCluster computes it from the written Newick file. Diameters never decrease towards the root, so at threshold $t$ the number of clusters (counting each singleton as one) is
+
+$$
+K(t) \;=\; n \;-\; \sum_{v:\ \Delta_v \le t} \big(\text{children}(v) - 1\big).
+$$
+
+Sweeping the sorted diameters lists every cluster count the tree can give, and the range of $t$ that gives it, without running TreeCluster for each candidate. The panel size for $K$ clusters is $K + a(K)$, where $a(K)$ is the number of low-coverage additions (§9.3). For each request:
+
+- **`-n N`** uses the cut whose panel size is closest to $N$. On a tie, the smaller panel wins.
+- **`-n MIN-MAX`** uses every cut whose panel size lies in the range. If none does, it uses the closest one.
+
+Not every size is possible: one merge in the tree can join several clusters at once, so the result can differ from the number requested. The threshold passed to TreeCluster is the shortest decimal (at least two places) inside the chosen range of $t$, as near its middle as that precision allows. After clustering, the cluster count is checked against the prediction, and a warning is printed if they differ. Every achievable panel size, with its range of $t$, is written to `results/panel_sizes.csv` on every run, so it can be used to pick sizes for a re-run. `-t` and `-n` can be combined; without either, $t = 0.20$.
+
 ---
 
 ## 7. Stage 5: Superposition onto the cluster medoid
@@ -466,6 +485,24 @@ If several sequences tie, the first in alphabetical order of structure name wins
 results/clusters/<t>/threshold_<t>_cluster_representatives.fasta
 ```
 
+### 9.3 Panel assembly and low-coverage additions
+
+**Module:** `panel.py`
+
+The panel for threshold $t$ starts with one structure per cluster: each cluster's representative and every singleton. If a cluster has no representative, its medoid is used and a warning is printed. Call this set $P$ and its size $K$.
+
+The **coverage** of structure $i$ is its best TM-score to any panel member, $c_i = \max_{j \in P} T_{ij}$, so panel members have $c_i = 1$. Because clusters are defined by linkage averages (§6), some members of large clusters can be poorly matched by their representative. The panel is topped up with $a$ of them, farthest-first: add $\arg\min_{i \notin P} c_i$, update every $c_i$, and repeat. Updating after each addition stops two near-identical outliers both being added. Ties go to the first name alphabetically.
+
+`-l/--low-coverage-fraction` sets the share $f$ of the final panel given to these additions (default 0.05):
+
+$$
+a(K) \;=\; \min\!\left(\left\lfloor \frac{f K}{1 - f} + \tfrac12 \right\rfloor,\ n - K\right),
+$$
+
+so that $a / (K + a) \approx f$. With $f = 0.05$, a 57-cluster cut gets 3 additions (panel of 60) and a cut with 9 or fewer clusters gets none. `-l 0` turns this off.
+
+For each threshold, the panel is written to `clusters/<t>/threshold_<t>_panel.csv` (one row per member: role, cluster, cluster size, how many structures it is the best match for, and, for additions, its coverage when it was added) and `threshold_<t>_panel.fasta`. `results/panels.csv` summarises every panel: its size, composition, and the mean, 10th percentile and minimum of $c_i$ over all $n$ structures. Panel members are included in these, with $c_i = 1$.
+
 ---
 
 ## 10. Outputs
@@ -477,10 +514,14 @@ results/clusters/<t>/threshold_<t>_cluster_representatives.fasta
     ├── duplicates.csv              name-clash report (header only if none)
     ├── us-align_score_matrix.csv   symmetric TM-score matrix T (NaN = failed pair)
     ├── colabalign.tree             Newick dendrogram
+    ├── panel_sizes.csv             every achievable panel size and its thresholds
+    ├── panels.csv                  one row per panel: size, composition, coverage
     ├── usalign_cache/              v2_*.pkl per-pair results (reusable between runs)
     └── clusters/
         ├── <t>.tsv                 TreeCluster assignments (-1 = singleton)
         └── <t>/
+            ├── threshold_<t>_panel.csv     panel members, roles and coverage
+            ├── threshold_<t>_panel.fasta   panel sequences
             ├── threshold_<t>_cluster_representatives.fasta
             ├── -1/                 singletons, copied unchanged
             └── <c>/
@@ -498,7 +539,9 @@ results/clusters/<t>/threshold_<t>_cluster_representatives.fasta
 | `-i/--input` | (required) | Files, directories or archives |
 | `-o/--output` | (required) | Output directory (created if missing) |
 | `-c/--cores` | 2 | Worker processes. Values below 1 are raised to 1; values above `cpu_count()` are capped |
-| `-t/--threshold` | 0.20 | One or more `max_clade` thresholds $t \in [0.01, 1]$; a cluster's linkage-level TM-score is at least $1 - t$ |
+| `-n/--panel-size` | none | One or more panel sizes, each `N` (closest achievable) or `MIN-MAX` (every achievable size in the range); $t$ is chosen for each (§6.1) |
+| `-t/--threshold` | 0.20 if no `-n` | One or more `max_clade` thresholds $t \in [0.01, 1]$; a cluster's linkage-level TM-score is at least $1 - t$ |
+| `-l/--low-coverage-fraction` | 0.05 | Share of each panel given to low-coverage additions, from 0 to 0.5 (§9.3) |
 | `-m/--mode` | `all` | `all` chains, or only the `first` chain of each input |
 | `-u/--usalign` | `USalign` | Path to the US-align executable |
 | `-b/--beem` | `BeEM` | Path to BeEM (only needed for `.cif` inputs) |
@@ -543,7 +586,8 @@ These are properties of the current implementation that affect how the results s
 
 - **The tree uses WPGMA, not size-weighted UPGMA.** As described in §5.2, Biopython's `upgma` averages the two merged sides equally. The per-cluster guide tree (§8.2) *does* use size-weighted UPGMA.
 - **Missing pairs are treated as unrelated.** A failed alignment is set to $T = 0$ ($D = 1$). This can separate structures that would otherwise cluster together, so check the warning list after each run.
-- **Singletons are not in the representatives file.** Cluster `-1` is skipped in Stages 6 and 7, so `threshold_<t>_cluster_representatives.fasta` lists only clusters with two or more members. Each singleton is its own representative and can be found in `clusters/<t>/-1/`.
+- **Singletons are not in the representatives file.** Cluster `-1` is skipped in Stages 6 and 7, so `threshold_<t>_cluster_representatives.fasta` lists only clusters with two or more members. Each singleton is its own representative and can be found in `clusters/<t>/-1/`. The panel files (§9.3) include singletons.
+- **Clusters shared between thresholds are aligned once.** When several thresholds give a cluster with the same members, as nearby thresholds in a `-n MIN-MAX` sweep usually do, its MSA is built once and the files are copied under each threshold's names.
 - **The consensus ignores how many sequences have a gap.** In §9.1, $\tau$ is measured over non-gap residues only. In a column where a single sequence has an insertion, that residue is 100 % of $G_k$ and becomes the consensus symbol, so the sequence with the insertion gains +1 there and every gapped sequence loses 1. Representative selection can therefore favour sequences with unique insertions.
 - **Thresholds are linkage averages.** §6 explains why some individual pairs within a cluster can fall below $1 - t$.
 
