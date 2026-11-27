@@ -92,7 +92,11 @@ def build_score_matrix_sparse(profile_a, profile_b, library):
 
 
 def gotoh_align(score, gap_open=6.0, gap_extend=1.0):
-    '''Run Gotoh affine-gap alignment on a score matrix and return the traceback path.'''
+    '''Run Gotoh affine-gap alignment on a score matrix and return the traceback path.
+
+    M[i,j] = max(M, X, Y)[i-1,j-1] + S[i-1,j-1]
+    X[i,j] = max(M[i-1,j] - gap_open, X[i-1,j] - gap_extend)
+    Y[i,j] = max(M[i,j-1] - gap_open, Y[i,j-1] - gap_extend)'''
     n, m = score.shape
     match = np.full((n + 1, m + 1), NEG_INF)
     gap_x = np.full((n + 1, m + 1), NEG_INF)
@@ -102,11 +106,20 @@ def gotoh_align(score, gap_open=6.0, gap_extend=1.0):
         gap_x[i, 0] = -gap_open - (i - 1) * gap_extend
     for j in range(1, m + 1):
         gap_y[0, j] = -gap_open - (j - 1) * gap_extend
+    # Row by row. M and X depend only on the previous row, so each is one vector
+    # operation per row. Y depends on the cell to its left, so it is a short loop
+    # over plain floats. Every cell uses the same operations, in the same order,
+    # as the cell-by-cell recurrences above, so the result is identical.
     for i in range(1, n + 1):
-        for j in range(1, m + 1):
-            match[i, j] = max(match[i-1, j-1], gap_x[i-1, j-1], gap_y[i-1, j-1]) + score[i-1, j-1]
-            gap_x[i, j] = max(match[i-1, j] - gap_open, gap_x[i-1, j] - gap_extend)
-            gap_y[i, j] = max(match[i, j-1] - gap_open, gap_y[i, j-1] - gap_extend)
+        match[i, 1:] = np.maximum(np.maximum(match[i-1, :-1], gap_x[i-1, :-1]),
+                                  gap_y[i-1, :-1]) + score[i-1, :]
+        gap_x[i, 1:] = np.maximum(match[i-1, 1:] - gap_open, gap_x[i-1, 1:] - gap_extend)
+        opened = (match[i, :-1] - gap_open).tolist()
+        row, previous = [0.0] * m, float(gap_y[i, 0])
+        for j in range(m):
+            previous = max(opened[j], previous - gap_extend)
+            row[j] = previous
+        gap_y[i, 1:] = row
 
     i, j = n, m
     state = int(np.argmax([match[i, j], gap_x[i, j], gap_y[i, j]]))
@@ -216,24 +229,56 @@ def remove_structure(sid, profile):
     return [col for col in remaining if col]
 
 
+def _column_luts(profile):
+    '''For every structure, an array mapping residue index -> profile column (-1 if absent).'''
+    return {sid: _build_residue_lut(res_to_col)
+            for sid, res_to_col in _residue_to_col_map(profile).items()}
+
+
+def structure_score(sid, luts, library, others):
+    '''Weights of the library pairs between sid and each other structure that the
+    profile places in the same column. Summed over all sids, every pair is counted
+    twice, so this equals the sid-involving part of profile_score_sum.'''
+    lut_a = luts[sid]
+    total = 0.0
+    for other in others:
+        res_a, res_b, weight = _resolve_pair_entry(sid, other, library)
+        if res_a is None or len(res_a) == 0:
+            continue
+        lut_b = luts[other]
+        valid = (res_a < len(lut_a)) & (res_b < len(lut_b))
+        col_a, col_b = lut_a[res_a[valid]], lut_b[res_b[valid]]
+        same = (col_a >= 0) & (col_a == col_b)
+        total += float(weight[valid][same].sum(dtype=np.float64))
+    return total
+
+
 def refine_msa(profile, library, max_passes=3):
-    '''Improve an MSA via leave-one-out re-alignment passes until no gain is found.'''
+    '''Improve an MSA via leave-one-out re-alignment passes until no gain is found.
+
+    Re-aligning one structure keeps every column of the remaining profile intact,
+    so only the pairs involving that structure can change their score. Comparing
+    those pairs alone gives the same accept/reject decision as comparing
+    profile_score_sum of the whole candidate and current profiles, in O(|C|)
+    rather than O(|C|^2) pair look-ups per candidate.'''
     struct_ids = sorted({sid for col in profile for sid in col})
     if len(struct_ids) < 3:
         return profile  # nothing to refine with fewer than 3 structures
 
     current = profile
-    current_score = profile_score_sum(current, library)
+    current_luts = _column_luts(current)
 
     for _ in range(max_passes):
         improved = False
         for sid in struct_ids:
+            others = [other for other in struct_ids if other != sid]
             leaf = extract_leaf_profile(sid, current)
             rest = remove_structure(sid, current)
             candidate = merge_profiles(rest, leaf, library)
-            candidate_score = profile_score_sum(candidate, library)
-            if candidate_score > current_score:
-                current, current_score = candidate, candidate_score
+            candidate_luts = _column_luts(candidate)
+            if (structure_score(sid, candidate_luts, library, others)
+                    > structure_score(sid, current_luts, library, others)):
+                current, current_luts = candidate, candidate_luts
                 improved = True
         if not improved:
             break
@@ -413,7 +458,10 @@ class ClusterConsensus:
                 unit=' reps chosen', dynamic_ncols=True, leave=True,
             )
             futures = {}
-            for member_set, group in groups.items():
+            # Largest clusters first: one big cluster can take longer than all the
+            # others together, so starting it last would leave workers idle.
+            for member_set, group in sorted(groups.items(),
+                                            key=lambda item: (-len(item[0]), sorted(item[0]))):
                 threshold_str, cluster_num, pdb_dir, _ = group[0]
                 members = [m for m in sorted(member_set) if m in self.tmmatrix.index]
                 sub_tmmatrix = self.tmmatrix.loc[members, members]
