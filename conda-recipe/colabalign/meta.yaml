@@ -33,6 +33,7 @@ requirements:
     - pandas >=3.1,<4
     - biopython >=1.88,<2
     - scipy >=1.18,<2
+    - numba >=0.68,<1
     - tqdm >=4.70,<5
     - treecluster >=1.0.5,<2
     - usalign >=20241201

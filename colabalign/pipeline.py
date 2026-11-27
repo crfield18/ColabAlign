@@ -3,7 +3,6 @@
 from os import cpu_count
 import shutil
 import warnings
-from types import SimpleNamespace
 from pathlib import Path
 from time import time
 
@@ -80,13 +79,7 @@ class ColabAlign:
         panel_size = _normalise_panel_sizes(panel_size)
         if threshold is None:
             threshold = [] if panel_size else [DEFAULT_THRESHOLD]
-        args = SimpleNamespace(
-            input=[Path(p) for p in inputs], output=Path(output), cores=int(cores),
-            threshold=[float(t) for t in threshold], usalign=Path(usalign),
-            beem=Path(beem), mode=mode,
-        )
-
-        self.thresholds = args.threshold
+        self.thresholds = [float(t) for t in threshold]
         self.panel_sizes = panel_size
         self.low_coverage_fraction = float(low_coverage_fraction)
         self.superpose = bool(superpose)
@@ -94,7 +87,7 @@ class ColabAlign:
         self.expected_clusters = {}
 
         print('Setting up file structure.')
-        self.home_path = args.output
+        self.home_path = Path(output)
         self.models_path = self.home_path.joinpath('models')
         self.results_path = self.home_path.joinpath('results')
 
@@ -107,11 +100,12 @@ class ColabAlign:
         # Temporary home for the contents of any uploaded .zip/.tar archives;
         # removed once structure preparation has finished with them.
         self.extract_path = self.home_path.joinpath('.extracted_inputs')
-        self.model_list, self.duplicate_rows = collect_input_models(args.input, self.extract_path)
+        self.model_list, self.duplicate_rows = collect_input_models(
+            [Path(p) for p in inputs], self.extract_path)
         if not self.model_list:
             raise SystemExit('No .pdb, .cif, .zip or .tar(.gz) input files found.')
 
-        self.cores = args.cores
+        self.cores = int(cores)
         if self.cores <= 0:
             warnings.warn(
                 'User-defined core count cannot be lower than 1. '
@@ -125,13 +119,13 @@ class ColabAlign:
             )
             self.cores = cpu_count()
 
-        self.usalign_path = _require_executable(args.usalign, 'USalign', '-u/--usalign')
+        self.usalign_path = _require_executable(Path(usalign), 'USalign', '-u/--usalign')
         if any(m.suffix.lower() == '.cif' for m in self.model_list):
-            self.beem_path = _require_executable(args.beem, 'BeEM', '-b/--beem')
+            self.beem_path = _require_executable(Path(beem), 'BeEM', '-b/--beem')
         else:
-            self.beem_path = args.beem  # only needed for .cif inputs
+            self.beem_path = Path(beem)  # only needed for .cif inputs
         _require_executable(Path('TreeCluster.py'), 'TreeCluster.py', None)
-        self.mode = args.mode
+        self.mode = mode
 
         self.tmmatrix = None
         self.pair_store = None

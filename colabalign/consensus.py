@@ -7,6 +7,7 @@ from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
+from numba import njit as _numba_njit
 from scipy.cluster.hierarchy import linkage
 from scipy.spatial.distance import squareform
 from tqdm.auto import tqdm as tqdm_auto
@@ -14,6 +15,17 @@ from tqdm.auto import tqdm as tqdm_auto
 from .common import extract_sequence, process_context
 
 NEG_INF = -1e9
+
+
+def njit(function):
+    '''Compile with Numba, caching the machine code on disk when possible.
+
+    Numba refuses to cache when neither the package folder nor the user cache
+    folder is writable (e.g. a read-only container); compile per process then.'''
+    try:
+        return _numba_njit(cache=True, nogil=True)(function)
+    except RuntimeError:
+        return _numba_njit(nogil=True)(function)
 
 MVIEW_LUT = {
     'o': {'S', 'T'},
@@ -27,29 +39,31 @@ MVIEW_LUT = {
     's': {'A', 'C', 'D', 'G', 'N', 'P', 'S', 'T', 'V'},
     'u': {'A', 'G', 'S'},
     't': {'A', 'C', 'D', 'E', 'G', 'H', 'K', 'N', 'Q', 'R', 'S', 'T'},
-    '*': {'*'},
 }
 
 
 
 
 # Progressive profile-merge MSA (per cluster)
-def _residue_to_col_map(profile):
-    '''Map each structure ID to a {residue_index: column_index} dict for a profile.'''
-    maps = {}
+def _column_luts(profile):
+    '''For every structure, an array mapping residue index -> profile column (-1 if absent).
+
+    Structures are listed in order of first appearance in the profile, which
+    sets the (floating-point) order in which pair scores are accumulated.'''
+    positions = {}
     for col_idx, col in enumerate(profile):
         for sid, res in col.items():
-            maps.setdefault(sid, {})[res] = col_idx
-    return maps
-
-
-def _build_residue_lut(residue_to_col):
-    '''Build a dense lookup array mapping residue index -> profile column index.'''
-    max_res = max(residue_to_col.keys(), default=-1) + 1
-    lut = np.full(max_res, -1, dtype=np.int32)
-    for residue, col in residue_to_col.items():
-        lut[residue] = col
-    return lut
+            entry = positions.get(sid)
+            if entry is None:
+                positions[sid] = entry = ([], [])
+            entry[0].append(res)
+            entry[1].append(col_idx)
+    luts = {}
+    for sid, (residues, columns) in positions.items():
+        lut = np.full(max(residues) + 1, -1, dtype=np.int32)
+        lut[residues] = columns  # each residue occurs once in a profile
+        luts[sid] = lut
+    return luts
 
 
 def _resolve_pair_entry(sid_a, sid_b, library):
@@ -77,18 +91,47 @@ def _accumulate_pair_score(score, lut_a, lut_b, res_a, res_b, weight):
 def build_score_matrix_sparse(profile_a, profile_b, library):
     '''Build a dense column-vs-column score matrix between two profiles.'''
     score = np.zeros((len(profile_a), len(profile_b)), dtype=np.float32)
-    map_a, map_b = _residue_to_col_map(profile_a), _residue_to_col_map(profile_b)
+    luts_a, luts_b = _column_luts(profile_a), _column_luts(profile_b)
 
-    for sid_a, residues_a in map_a.items():
-        lut_a = _build_residue_lut(residues_a)
-        for sid_b, residues_b in map_b.items():
+    for sid_a, lut_a in luts_a.items():
+        for sid_b, lut_b in luts_b.items():
             res_a, res_b, weight = _resolve_pair_entry(sid_a, sid_b, library)
             if res_a is None or len(res_a) == 0:
                 continue
-            lut_b = _build_residue_lut(residues_b)
             _accumulate_pair_score(score, lut_a, lut_b, res_a, res_b, weight)
 
     return score
+
+
+@njit
+def _fill_tables(score, gap_open, gap_extend, neg_inf):
+    '''Fill the three Gotoh tables (compiled with Numba).
+
+    Each max keeps the first argument on a tie, as Python's max() does.'''
+    n, m = score.shape
+    match = np.full((n + 1, m + 1), neg_inf)
+    gap_x = np.full((n + 1, m + 1), neg_inf)
+    gap_y = np.full((n + 1, m + 1), neg_inf)
+    match[0, 0] = 0.0
+    for i in range(1, n + 1):
+        gap_x[i, 0] = -gap_open - (i - 1) * gap_extend
+    for j in range(1, m + 1):
+        gap_y[0, j] = -gap_open - (j - 1) * gap_extend
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            best = match[i-1, j-1]
+            if gap_x[i-1, j-1] > best:
+                best = gap_x[i-1, j-1]
+            if gap_y[i-1, j-1] > best:
+                best = gap_y[i-1, j-1]
+            match[i, j] = best + np.float64(score[i-1, j-1])
+            opened = match[i-1, j] - gap_open
+            extended = gap_x[i-1, j] - gap_extend
+            gap_x[i, j] = extended if extended > opened else opened
+            opened = match[i, j-1] - gap_open
+            extended = gap_y[i, j-1] - gap_extend
+            gap_y[i, j] = extended if extended > opened else opened
+    return match, gap_x, gap_y
 
 
 def gotoh_align(score, gap_open=6.0, gap_extend=1.0):
@@ -97,52 +140,50 @@ def gotoh_align(score, gap_open=6.0, gap_extend=1.0):
     M[i,j] = max(M, X, Y)[i-1,j-1] + S[i-1,j-1]
     X[i,j] = max(M[i-1,j] - gap_open, X[i-1,j] - gap_extend)
     Y[i,j] = max(M[i,j-1] - gap_open, Y[i,j-1] - gap_extend)'''
-    n, m = score.shape
-    match = np.full((n + 1, m + 1), NEG_INF)
-    gap_x = np.full((n + 1, m + 1), NEG_INF)
-    gap_y = np.full((n + 1, m + 1), NEG_INF)
-    match[0, 0] = 0.0
-    for i in range(1, n + 1):
-        gap_x[i, 0] = -gap_open - (i - 1) * gap_extend
-    for j in range(1, m + 1):
-        gap_y[0, j] = -gap_open - (j - 1) * gap_extend
-    # Row by row. M and X depend only on the previous row, so each is one vector
-    # operation per row. Y depends on the cell to its left, so it is a short loop
-    # over plain floats. Every cell uses the same operations, in the same order,
-    # as the cell-by-cell recurrences above, so the result is identical.
-    for i in range(1, n + 1):
-        match[i, 1:] = np.maximum(np.maximum(match[i-1, :-1], gap_x[i-1, :-1]),
-                                  gap_y[i-1, :-1]) + score[i-1, :]
-        gap_x[i, 1:] = np.maximum(match[i-1, 1:] - gap_open, gap_x[i-1, 1:] - gap_extend)
-        opened = (match[i, :-1] - gap_open).tolist()
-        row, previous = [0.0] * m, float(gap_y[i, 0])
-        for j in range(m):
-            previous = max(opened[j], previous - gap_extend)
-            row[j] = previous
-        gap_y[i, 1:] = row
+    match, gap_x, gap_y = _fill_tables(np.ascontiguousarray(score, dtype=np.float32),
+                                       float(gap_open), float(gap_extend), float(NEG_INF))
+    rows, cols = _traceback(match, gap_x, gap_y)
+    return [(None if i < 0 else int(i), None if j < 0 else int(j)) for i, j in zip(rows, cols)]
 
-    i, j = n, m
-    state = int(np.argmax([match[i, j], gap_x[i, j], gap_y[i, j]]))
-    path = []
+
+@njit
+def _best_state(match, gap_x, gap_y, i, j):
+    '''Index of the largest of M, X, Y at (i, j); the first wins a tie, as np.argmax.'''
+    state, best = 0, match[i, j]
+    if gap_x[i, j] > best:
+        state, best = 1, gap_x[i, j]
+    if gap_y[i, j] > best:
+        state = 2
+    return state
+
+
+@njit
+def _traceback(match, gap_x, gap_y):
+    '''Trace the optimal path back from the bottom-right corner (compiled with Numba).
+
+    Returns the aligned row and column indices in path order, with -1 for a gap.'''
+    i, j = match.shape[0] - 1, match.shape[1] - 1
+    rows = np.empty(i + j, dtype=np.int64)
+    cols = np.empty(i + j, dtype=np.int64)
+    k = 0
+    state = _best_state(match, gap_x, gap_y, i, j)
     while i > 0 or j > 0:
         if state == 0 and i > 0 and j > 0:
-            path.append((i - 1, j - 1))
+            rows[k], cols[k] = i - 1, j - 1
             i, j = i - 1, j - 1
-            state = 0 if (i, j) == (0, 0) else int(
-                np.argmax([match[i, j], gap_x[i, j], gap_y[i, j]])
-                )
+            state = 0 if (i == 0 and j == 0) else _best_state(match, gap_x, gap_y, i, j)
         elif state == 1 and i > 0:
-            path.append((i - 1, None))
+            rows[k], cols[k] = i - 1, -1
             i -= 1
             state = 0 if match[i, j] >= gap_x[i, j] else 1
         elif j > 0:
-            path.append((None, j - 1))
+            rows[k], cols[k] = -1, j - 1
             j -= 1
             state = 0 if match[i, j] >= gap_y[i, j] else 2
         else:
             break
-    path.reverse()
-    return path
+        k += 1
+    return rows[:k][::-1], cols[:k][::-1]
 
 
 def merge_profiles(profile_a, profile_b, library, gap_open=6.0, gap_extend=1.0):
@@ -200,24 +241,6 @@ def profile_to_aligned_sequences(root_profile, sequences):
             aligned[sid].append(sequences[sid][col[sid]] if sid in col else '-')
     return {sid: ''.join(chars) for sid, chars in aligned.items()}
 
-def profile_score_sum(profile, library):
-    '''Sum pairwise alignment weights realized by the current column arrangement.'''
-    struct_ids = sorted({sid for col in profile for sid in col})
-    total = 0.0
-    for a_idx, sid_a in enumerate(struct_ids):
-        for sid_b in struct_ids[a_idx + 1:]:
-            res_a, res_b, weight = _resolve_pair_entry(sid_a, sid_b, library)
-            if res_a is None:
-                continue
-            aligned_pairs = {
-                (ra, rb): wi for ra, rb, wi in zip(res_a.tolist(), res_b.tolist(), weight.tolist())
-            }
-            for col in profile:
-                if sid_a in col and sid_b in col:
-                    total += aligned_pairs.get((col[sid_a], col[sid_b]), 0.0)
-    return total
-
-
 def extract_leaf_profile(sid, profile):
     '''Extract a single structure's columns out of a merged profile as its own profile.'''
     return [{sid: col[sid]} for col in profile if sid in col]
@@ -229,16 +252,10 @@ def remove_structure(sid, profile):
     return [col for col in remaining if col]
 
 
-def _column_luts(profile):
-    '''For every structure, an array mapping residue index -> profile column (-1 if absent).'''
-    return {sid: _build_residue_lut(res_to_col)
-            for sid, res_to_col in _residue_to_col_map(profile).items()}
-
-
 def structure_score(sid, luts, library, others):
     '''Weights of the library pairs between sid and each other structure that the
     profile places in the same column. Summed over all sids, every pair is counted
-    twice, so this equals the sid-involving part of profile_score_sum.'''
+    twice, so the sum over all structures is twice the profile's total score.'''
     lut_a = luts[sid]
     total = 0.0
     for other in others:
@@ -258,9 +275,9 @@ def refine_msa(profile, library, max_passes=3):
 
     Re-aligning one structure keeps every column of the remaining profile intact,
     so only the pairs involving that structure can change their score. Comparing
-    those pairs alone gives the same accept/reject decision as comparing
-    profile_score_sum of the whole candidate and current profiles, in O(|C|)
-    rather than O(|C|^2) pair look-ups per candidate.'''
+    those pairs alone gives the same accept/reject decision as re-scoring the
+    whole candidate and current profiles, in O(|C|) rather than O(|C|^2) pair
+    look-ups per candidate.'''
     struct_ids = sorted({sid for col in profile for sid in col})
     if len(struct_ids) < 3:
         return profile  # nothing to refine with fewer than 3 structures
@@ -299,8 +316,6 @@ def consensus_column(chars, threshold=0.6):
     if top_count / n >= threshold:
         return top_char
     for symbol, group in MVIEW_LUT.items():
-        if symbol == '*':
-            continue
         if sum(1 for c in non_gap if c in group) / n >= threshold:
             return symbol
     return '.'

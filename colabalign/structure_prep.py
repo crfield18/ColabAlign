@@ -112,21 +112,6 @@ def _extract_archive_members(archive_path: Path, extract_dir: Path):
     return extracted
 
 
-def extract_archive(archive_path: Path, extract_dir: Path):
-    '''
-    Extract only the .pdb/.cif members of a .zip or tar archive (.tar,
-    .tar.gz/.tgz, .tar.bz2, .tar.xz) into extract_dir/<archive stem>/,
-    preserving the archive's internal folder layout so identically named
-    files in different folders don't overwrite each other. Returns the list
-    of extracted structure files.
-    '''
-    return [path for path, _ in _extract_archive_members(archive_path, extract_dir)]
-
-
-# Backwards-compatible name.
-extract_zip_archive = extract_archive
-
-
 def content_hash(path: Path) -> str:
     '''Full sha256 hex digest of a file's contents.'''
     digest = hashlib.sha256()
@@ -249,11 +234,6 @@ def _mark_identical(rows):
         earlier = first_with_hash.setdefault(row['sha256'], row['name_in_colabalign'])
         if earlier != row['name_in_colabalign']:
             row['identical_to'] = earlier
-
-
-def discover_input_models(input_paths, extract_dir: Path):
-    '''collect_input_models() without the duplicate report.'''
-    return collect_input_models(input_paths, extract_dir)[0]
 
 
 def write_duplicates_csv(rows, csv_path: Path):
@@ -411,20 +391,14 @@ def _copy_and_convert_models(model_list, models_path: Path, beem_path: Path, cor
     return outputs_by_model
 
 
-def prepare_models(model_list, models_path: Path, beem_path: Path, mode: str, cores: int = 1):
-    '''
-    Copy/convert input structures into single-chain PDB files under models_path.
-    Returns the final, filtered list of PDB files to align.
-    '''
-    return prepare_models_with_chains(model_list, models_path, beem_path, mode, cores)[0]
-
-
 def prepare_models_with_chains(model_list, models_path: Path, beem_path: Path, mode: str,
                                cores: int = 1):
     '''
-    prepare_models(), also returning {input file name: [aligned chain labels]}
-    where a label is the chain file stem used in the score matrix, tree and
-    clusters (e.g. ranked_0_dup1A). Inputs with no surviving chains map to [].
+    Copy/convert input structures into single-chain PDB files under models_path.
+    Returns (the final, filtered list of PDB files to align,
+    {input file name: [aligned chain labels]}), where a label is the chain file
+    stem used in the score matrix, tree and clusters (e.g. ranked_0_dup1A).
+    Inputs with no surviving chains map to [].
     '''
     print('Copying pdb files and converting .cif files to .pdb.')
     original_stems = {m.stem for m in model_list}

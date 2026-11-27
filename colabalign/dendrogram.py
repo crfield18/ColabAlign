@@ -136,10 +136,10 @@ def _parse_cluster_file(results_path: Path, threshold_str: str):
     return clusters
 
 
-def _copy_unclustered_members(member_names, model_list, models_path, cluster_output_dir):
+def _copy_unclustered_members(member_names, files_by_stem, models_path, cluster_output_dir):
     '''Copy singleton/unclustered (-1) members over without any superposition.'''
     for name in member_names:
-        original_file = next((f for f in model_list if f.stem == name), None)
+        original_file = files_by_stem.get(name)
         if original_file:
             copy(models_path.joinpath(original_file.name),
                  cluster_output_dir.joinpath(original_file.name))
@@ -152,7 +152,7 @@ def _select_medoid(tmmatrix: pd.DataFrame, member_names):
 
 
 def _superpose_member(
-    name, reference_model_name, pair_store, model_list, models_path, cluster_output_dir
+    name, reference_model_name, pair_store, files_by_stem, models_path, cluster_output_dir
     ):
     '''Superpose a single cluster member onto the reference (medoid) structure.'''
     transform_matrix = pair_store.transform(name, reference_model_name)
@@ -162,7 +162,7 @@ def _superpose_member(
             )
         return
 
-    model_file = next((f for f in model_list if f.stem == name), None)
+    model_file = files_by_stem.get(name)
     if model_file is None:
         return
 
@@ -176,10 +176,10 @@ def _superpose_member(
 
 def _process_cluster(cluster_num, member_names, ctx, cluster_output_dir):
     '''Copy the medoid and superpose the rest of a single cluster's members onto it.'''
-    tmmatrix, pair_store, model_list, models_path = ctx
+    tmmatrix, pair_store, files_by_stem, models_path = ctx
 
     if cluster_num == -1:
-        _copy_unclustered_members(member_names, model_list, models_path, cluster_output_dir)
+        _copy_unclustered_members(member_names, files_by_stem, models_path, cluster_output_dir)
         return
 
     # Medoid selection: highest MEAN TM-score to the rest of the cluster,
@@ -187,7 +187,7 @@ def _process_cluster(cluster_num, member_names, ctx, cluster_output_dir):
     # can pick an atypical structure).
     reference_model_name = _select_medoid(tmmatrix, member_names)
 
-    ref_file = next((f for f in model_list if f.stem == reference_model_name), None)
+    ref_file = files_by_stem.get(reference_model_name)
     if ref_file is None:
         return
 
@@ -197,7 +197,7 @@ def _process_cluster(cluster_num, member_names, ctx, cluster_output_dir):
         if name == reference_model_name:
             continue
         _superpose_member(
-            name, reference_model_name, pair_store, model_list, models_path, cluster_output_dir
+            name, reference_model_name, pair_store, files_by_stem, models_path, cluster_output_dir
             )
 
 
@@ -216,7 +216,7 @@ def tree_clustering(thresholds, results_path: Path, tmmatrix: pd.DataFrame,
 
     _run_treecluster(thresholds, results_path)
 
-    ctx = (tmmatrix, pair_store, model_list, models_path)
+    ctx = (tmmatrix, pair_store, {f.stem: f for f in model_list}, models_path)
     all_clusters_by_threshold = {}
 
     # Nearby thresholds share most clusters. The medoid and superposition depend

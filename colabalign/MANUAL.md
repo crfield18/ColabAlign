@@ -572,6 +572,8 @@ These internal constants are not exposed as options:
 | Dendrogram | Biopython's implementation rescans the matrix at every merge, giving $\mathcal{O}(n^3)$ time and $\mathcal{O}(n^2)$ memory |
 | MSA (per cluster $C$) | $\lvert C\rvert - 1$ progressive merges, plus up to $3\lvert C\rvert$ refinement merges, each $\mathcal{O}(nm)$ plus library look-ups |
 
+MSA refinement compares only the library pairs that involve the re-aligned structure: the remaining profile's columns are unchanged by the re-alignment, so every other pair keeps its score. This gives the same decisions as re-scoring the whole profile, at $\mathcal{O}(|C|)$ instead of $\mathcal{O}(|C|^2)$ pair look-ups per candidate. The Gotoh table fill and traceback are compiled with Numba [[23]](#ref-23). Numba caches the compiled code, so only the first run after installation pays the compile time (under a second).
+
 In practice the pairwise alignment stage dominates. Its quadratic growth becomes the main bottleneck once inputs go well beyond about 1,000 structures. Generating structures beforehand is a further, larger upstream cost: for example, predicting 1,000 CBM structures with AlphaFold2 [[18]](#ref-18) took about 10 days on 2× V100 GPUs.
 
 Two possible future directions:
@@ -618,3 +620,4 @@ These are properties of the current implementation that affect how the results s
 20. <a id="ref-20"></a>[10.1126/science.ads6733](https://doi.org/10.1126/science.ads6733)
 21. <a id="ref-21"></a>[10.1371/journal.pone.0082138](https://doi.org/10.1371/journal.pone.0082138)
 22. <a id="ref-22"></a>[10.1093/nargab/lqae150](https://doi.org/10.1093/nargab/lqae150)
+23. <a id="ref-23"></a>[10.1145/2833157.2833162](https://doi.org/10.1145/2833157.2833162)
