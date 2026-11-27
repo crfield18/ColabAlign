@@ -51,7 +51,8 @@ class ColabAlign:
     # pylint: disable=too-many-arguments,too-many-positional-arguments
     def __init__(self, inputs, output, cores: int = 1, threshold=None,
                  usalign='USalign', beem='BeEM', mode: str = 'all', panel_size=None,
-                 low_coverage_fraction: float = DEFAULT_LOW_COVERAGE_FRACTION) -> None:
+                 low_coverage_fraction: float = DEFAULT_LOW_COVERAGE_FRACTION,
+                 superpose: bool = True) -> None:
         '''
         Set up output directories and runtime parameters.
 
@@ -64,6 +65,8 @@ class ColabAlign:
         low_coverage_fraction: fraction of each panel given to the structures
             least covered by the cluster representatives.
         mode: 'all' chains or only the 'first' chain of each input.
+        superpose: write cluster members superposed onto their medoid. False
+            skips writing structure files; representatives are unchanged.
         '''
         if mode not in ('all', 'first'):
             raise ValueError(f"mode must be 'all' or 'first', not {mode!r}")
@@ -86,6 +89,7 @@ class ColabAlign:
         self.thresholds = args.threshold
         self.panel_sizes = panel_size
         self.low_coverage_fraction = float(low_coverage_fraction)
+        self.superpose = bool(superpose)
         self.requested_by_threshold = {}
         self.expected_clusters = {}
 
@@ -204,7 +208,7 @@ class ColabAlign:
         '''Cluster the dendrogram at each configured threshold.'''
         self.clusters_by_threshold = _tree_clustering(
             self.thresholds, self.results_path, self.tmmatrix,
-            self.pair_store, self.model_list, self.models_path
+            self.pair_store, self.model_list, self.models_path, self.superpose
         )
         for key, expected in self.expected_clusters.items():
             clusters = self.clusters_by_threshold[key]
@@ -215,8 +219,12 @@ class ColabAlign:
 
     def find_representatives(self):
         '''Select and write representative structures for each cluster at each threshold.'''
+        models_by_name = None if self.superpose else {
+            m.stem: self.models_path.joinpath(m.name) for m in self.model_list
+        }
         reps_parser = ClusterConsensus(
-            pair_store=self.pair_store, tmmatrix=self.tmmatrix, threads=self.cores
+            pair_store=self.pair_store, tmmatrix=self.tmmatrix, threads=self.cores,
+            models_by_name=models_by_name,
         )
         self.representatives_by_threshold = reps_parser.get_representatives_all_thresholds(
             self.results_path, self.clusters_by_threshold
@@ -250,7 +258,8 @@ class ColabAlign:
         return cls(inputs=args.input, output=args.output, cores=args.cores,
                    threshold=args.threshold, usalign=args.usalign, beem=args.beem,
                    mode=args.mode, panel_size=args.panel_size,
-                   low_coverage_fraction=args.low_coverage_fraction)
+                   low_coverage_fraction=args.low_coverage_fraction,
+                   superpose=not args.no_superpose)
 
     def run(self):
         '''Run the full pipeline end-to-end, reporting the elapsed time of each stage.'''

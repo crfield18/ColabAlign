@@ -345,7 +345,7 @@ $$
 \mathbf{R}^{-1} = \mathbf{R}^{\mathsf T}, \qquad \mathbf{t}^{-1} = -\mathbf{R}^{\mathsf T}\mathbf{t}
 $$
 
-The superposed PDB files are written to `results/clusters/<t>/<cluster>/`. Singletons (cluster `-1`) have no medoid, so they are copied to `results/clusters/<t>/-1/` unchanged.
+The superposed PDB files are written to `results/clusters/<t>/<cluster>/`. With `--no-superpose` this stage is skipped. A cluster that appears unchanged at several thresholds is superposed once, and its files are copied to the other thresholds. Singletons (cluster `-1`) have no medoid, so they are copied to `results/clusters/<t>/-1/` unchanged.
 
 ---
 
@@ -542,6 +542,7 @@ For each threshold, the panel is written to `clusters/<t>/threshold_<t>_panel.cs
 | `-n/--panel-size` | none | One or more panel sizes, each `N` (closest achievable) or `MIN-MAX` (every achievable size in the range); $t$ is chosen for each (§6.1) |
 | `-t/--threshold` | 0.20 if no `-n` | One or more `max_clade` thresholds $t \in [0.01, 1]$; a cluster's linkage-level TM-score is at least $1 - t$ |
 | `-l/--low-coverage-fraction` | 0.05 | Share of each panel given to low-coverage additions, from 0 to 0.5 (§9.3) |
+| `--no-superpose` | off | Skip Stage 5: no structure files are written to `clusters/`, and the MSAs read sequences from `models/` instead. Representatives, alignments and panels are identical |
 | `-m/--mode` | `all` | `all` chains, or only the `first` chain of each input |
 | `-u/--usalign` | `USalign` | Path to the US-align executable |
 | `-b/--beem` | `BeEM` | Path to BeEM (only needed for `.cif` inputs) |

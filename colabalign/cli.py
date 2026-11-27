@@ -104,6 +104,15 @@ def build_parser() -> ArgumentParser:
         )
     )
     parser.add_argument(
+        '--no-superpose',
+        action='store_true',
+        help=(
+            'Do not write superposed (or copied singleton) structure files to '
+            'results/clusters/. Representatives and panels are unchanged; this '
+            'only saves time and disk space.'
+        )
+    )
+    parser.add_argument(
         '-u', '--usalign',
         type=Path,
         required=False,

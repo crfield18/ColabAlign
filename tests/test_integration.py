@@ -251,3 +251,27 @@ def test_end_to_end_default_threshold(tmp_path, usalign, treecluster):  # pylint
     assert (results / 'clusters' / '0.20.tsv').is_file()
     assert (results / 'clusters' / '0.20' / 'threshold_0.20_panel.csv').is_file()
     assert (results / 'panels.csv').is_file() and (results / 'panel_sizes.csv').is_file()
+
+
+def test_no_superpose_gives_same_panels(tmp_path, usalign, treecluster):  # pylint: disable=unused-argument
+    from colabalign.pipeline import main
+    from conftest import make_structure_set
+
+    make_structure_set(tmp_path / 'in', per_family=4)
+    runs = {}
+    for name, extra in (('with', []), ('without', ['--no-superpose'])):
+        out = tmp_path / name
+        main(['-i', str(tmp_path / 'in'), '-o', str(out), '-c', '2', '-n', '4-8',
+              '-u', usalign, *extra])
+        runs[name] = out / 'results'
+    clusters = {name: results / 'clusters' for name, results in runs.items()}
+    assert list(clusters['with'].rglob('*.pdb'))
+    assert not list(clusters['without'].rglob('*.pdb'))
+    for pattern in ('*_cluster_representatives.fasta', '*_panel.csv', '*_panel.fasta', '*.afasta'):
+        with_files = sorted(p.relative_to(clusters['with']) for p in clusters['with'].rglob(pattern))
+        assert with_files
+        assert with_files == sorted(p.relative_to(clusters['without'])
+                                    for p in clusters['without'].rglob(pattern))
+        for rel in with_files:
+            assert (clusters['with'] / rel).read_text() == (clusters['without'] / rel).read_text()
+    assert (runs['with'] / 'panels.csv').read_text() == (runs['without'] / 'panels.csv').read_text()

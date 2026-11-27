@@ -347,13 +347,16 @@ def _cluster_file(pdb_dir, threshold, cluster_num, suffix):
 
 # pylint: disable=too-many-arguments,too-many-positional-arguments
 def process_cluster(pdb_dir: Path, cluster_num, threshold, pair_store, sub_tmmatrix,
-                    refine=True):
+                    refine=True, member_files=None):
     '''
     Build the MSA/consensus for one cluster and return its representative.
     Runs in a worker process. It receives only this cluster's slice of the
     TM-score matrix, and loads only this cluster's pairs from the PairStore.
+    Sequences come from the superposed PDBs in pdb_dir, or from member_files
+    (the prepared models) when superposition was skipped.
     '''
-    pdb_files = sorted(pdb_dir.glob('*.pdb'))
+    pdb_files = sorted(member_files, key=lambda p: p.stem) if member_files \
+        else sorted(pdb_dir.glob('*.pdb'))
     if not pdb_files:
         return None, cluster_num, threshold
 
@@ -370,12 +373,18 @@ def process_cluster(pdb_dir: Path, cluster_num, threshold, pair_store, sub_tmmat
 class ClusterConsensus:
     '''Builds per-cluster MSAs, consensus sequences, and selects representatives.'''
 
-    def __init__(self, pair_store, tmmatrix, threads: int = 1, refine: bool = True) -> None:
-        '''Store the PairStore, TM-score matrix, and run parameters.'''
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
+    def __init__(self, pair_store, tmmatrix, threads: int = 1, refine: bool = True,
+                 models_by_name=None) -> None:
+        '''Store the PairStore, TM-score matrix, and run parameters.
+
+        models_by_name maps structure names to prepared model files. When given,
+        sequences are read from these rather than from the superposed copies.'''
         self.pair_store = pair_store
         self.tmmatrix = tmmatrix
         self.threads = threads
         self.refine = refine
+        self.models_by_name = models_by_name
 
     def _collect_jobs(self, results_path: Path, clusters_by_threshold: dict):
         '''Build the list of (threshold, cluster_num, pdb_dir, member names) jobs.'''
@@ -408,9 +417,12 @@ class ClusterConsensus:
                 threshold_str, cluster_num, pdb_dir, _ = group[0]
                 members = [m for m in sorted(member_set) if m in self.tmmatrix.index]
                 sub_tmmatrix = self.tmmatrix.loc[members, members]
+                member_files = ([self.models_by_name[m] for m in sorted(member_set)]
+                                if self.models_by_name else None)
+                pdb_dir.mkdir(parents=True, exist_ok=True)
                 futures[executor.submit(
                     process_cluster, pdb_dir, cluster_num, threshold_str,
-                    self.pair_store, sub_tmmatrix, self.refine,
+                    self.pair_store, sub_tmmatrix, self.refine, member_files,
                 )] = group
             for future in as_completed(futures):
                 representative, cluster_num, threshold_str = future.result()

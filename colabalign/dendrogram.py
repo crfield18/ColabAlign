@@ -203,11 +203,14 @@ def _process_cluster(cluster_num, member_names, ctx, cluster_output_dir):
 
 # pylint: disable=too-many-arguments,too-many-positional-arguments
 def tree_clustering(thresholds, results_path: Path, tmmatrix: pd.DataFrame,
-                     pair_store, model_list, models_path: Path):
+                     pair_store, model_list, models_path: Path, superpose: bool = True):
     '''
     Runs TreeCluster.py per threshold, superposes cluster members onto the
-    cluster's medoid (highest MEAN TM-score to the rest of the cluster), and 
-    returns dict[threshold_str -> dict[cluster_num -> list of member stems]].
+    cluster's medoid (highest MEAN TM-score to the rest of the cluster,
+    not just the single highest pairwise TM-score), and returns
+    dict[threshold_str -> dict[cluster_num -> list of member stems]].
+    With superpose=False, only the cluster directories are created: no
+    structure files are written.
     '''
     print('Calculating clusters from structural tree.')
 
@@ -228,6 +231,8 @@ def tree_clustering(thresholds, results_path: Path, tmmatrix: pd.DataFrame,
         for cluster_num, member_names in clusters.items():
             cluster_output_dir = results_path.joinpath(f'clusters/{threshold_str}/{cluster_num}')
             cluster_output_dir.mkdir(exist_ok=True, parents=True)
+            if not superpose:
+                continue
             key = (cluster_num == -1, frozenset(member_names))
             if cluster_num != -1 and key in done:
                 for source in done[key].glob('*.pdb'):
