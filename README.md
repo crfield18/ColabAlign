@@ -39,9 +39,9 @@ Further information can be found at: <https://desmid.github.io/mview/manual/manu
 ### Installation for local usage
 
 
-**Conda package (once published).** Installs ColabAlign and all external tools:
+**Conda package ([Bioconda](https://bioconda.github.io/recipes/colabalign/README.html)).** Installs ColabAlign and all external tools:
 
-`conda install -c conda-forge -c bioconda colabalign=1.2.3`
+`conda install -c conda-forge -c bioconda colabalign`
 
 **From source.** Create the environment from the provided [YAML file](colabalign.yml), which includes the external tools, then install the package:
 

@@ -1,6 +1,6 @@
 # How ColabAlign works
 
-This document describes what ColabAlign [[1]](#ref-1) does, how each stage of the pipeline is implemented, and why the main design choices were made. It applies to **v1.2.3**.
+This document describes what ColabAlign [[1]](#ref-1) does, how each stage of the pipeline is implemented, and why the main design choices were made. It applies to **v1.3.0**.
 
 ---
 
@@ -356,7 +356,7 @@ The superposed PDB files are written to `results/clusters/<t>/<cluster>/`. With 
 
 **Module:** `consensus.py` (`build_cluster_alignment`)
 
-Each cluster (except `-1`) is aligned as a separate job, and all clusters from all thresholds share one worker pool. A job loads only its own slice of $\mathbf{T}$ and only the PairStore entries for pairs within the cluster.
+Each cluster (except `-1`) is aligned as a separate job, and all clusters from all thresholds share one worker pool. A job loads only its own slice of $\mathbf{T}$ and only the PairStore entries for pairs within the cluster. Sequences are read from the members' prepared models in `models/`, named explicitly, so files left in `results/clusters/` by an earlier run into the same output folder are never picked up.
 
 The method is a **progressive, library-based profile alignment**. Instead of scoring columns with an amino-acid substitution matrix, it scores them by how strongly **US-align superposed those residues onto each other**. The resulting MSA therefore reflects structural correspondence rather than sequence similarity.
 
@@ -545,7 +545,7 @@ For each threshold, the panel is written to `clusters/<t>/threshold_<t>_panel.cs
 | `-n/--panel-size` | none | One or more panel sizes, each `N` (closest achievable) or `MIN-MAX` (every achievable size in the range); $t$ is chosen for each (§6.1) |
 | `-t/--threshold` | 0.20 if no `-n` | One or more `max_clade` thresholds $t \in [0.01, 1]$; a cluster's linkage-level TM-score is at least $1 - t$ |
 | `-l/--low-coverage-fraction` | 0 | Share of each panel given to low-coverage additions, from 0 to 0.5 (§9.3) |
-| `--no-superpose` | off | Skip Stage 5: no structure files are written to `clusters/`, and the MSAs read sequences from `models/` instead. Representatives, alignments and panels are identical |
+| `--no-superpose` | off | Skip Stage 5: no structure files are written to `clusters/`. The MSAs always read sequences from `models/`, so representatives, alignments and panels are identical |
 | `-m/--mode` | `all` | `all` chains, or only the `first` chain of each input |
 | `-u/--usalign` | `USalign` | Path to the US-align executable |
 | `-b/--beem` | `BeEM` | Path to BeEM (only needed for `.cif` inputs) |

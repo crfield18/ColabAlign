@@ -214,9 +214,7 @@ class ColabAlign:
 
     def find_representatives(self):
         '''Select and write representative structures for each cluster at each threshold.'''
-        models_by_name = None if self.superpose else {
-            m.stem: self.models_path.joinpath(m.name) for m in self.model_list
-        }
+        models_by_name = {m.stem: self.models_path.joinpath(m.name) for m in self.model_list}
         reps_parser = ClusterConsensus(
             pair_store=self.pair_store, tmmatrix=self.tmmatrix, threads=self.cores,
             models_by_name=models_by_name,

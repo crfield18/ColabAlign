@@ -216,7 +216,8 @@ def tree_clustering(thresholds, results_path: Path, tmmatrix: pd.DataFrame,
 
     _run_treecluster(thresholds, results_path)
 
-    ctx = (tmmatrix, pair_store, {f.stem: f for f in model_list}, models_path)
+    files_by_stem = {f.stem: f for f in model_list}
+    ctx = (tmmatrix, pair_store, files_by_stem, models_path)
     all_clusters_by_threshold = {}
 
     # Nearby thresholds share most clusters. The medoid and superposition depend
@@ -235,8 +236,13 @@ def tree_clustering(thresholds, results_path: Path, tmmatrix: pd.DataFrame,
                 continue
             key = (cluster_num == -1, frozenset(member_names))
             if cluster_num != -1 and key in done:
-                for source in done[key].glob('*.pdb'):
-                    copy(source, cluster_output_dir.joinpath(source.name))
+                # Copy only this cluster's members: the earlier folder may also
+                # hold files left over from a previous run into the same output.
+                for name in member_names:
+                    model_file = files_by_stem.get(name)
+                    source = done[key].joinpath(model_file.name) if model_file else None
+                    if source is not None and source.is_file():
+                        copy(source, cluster_output_dir.joinpath(source.name))
                 reused += 1
                 continue
             _process_cluster(cluster_num, member_names, ctx, cluster_output_dir)

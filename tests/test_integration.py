@@ -291,3 +291,48 @@ def test_no_superpose_gives_same_panels(tmp_path, usalign, treecluster):  # pyli
         for rel in with_files:
             assert (clusters['with'] / rel).read_text() == (clusters['without'] / rel).read_text()
     assert (runs['with'] / 'panels.csv').read_text() == (runs['without'] / 'panels.csv').read_text()
+
+
+def test_rerun_ignores_stray_files_in_cluster_folders(tmp_path, usalign, treecluster):  # pylint: disable=unused-argument
+    '''Files left in results/clusters/ by an earlier run must not enter the
+    alignments, nor be copied to other thresholds' cluster folders.'''
+    import shutil
+    from colabalign.pipeline import main
+    from conftest import make_structure_set
+
+    src = make_structure_set(tmp_path / 'in', per_family=4)
+    out = tmp_path / 'out'
+    # Two thresholds that give the same clusters, so the second reuses the
+    # first's superposed files.
+    thresholds = ['0.64', '0.66']
+    args = ['-i', str(tmp_path / 'in'), '-o', str(out), '-c', '2', '-t', *thresholds,
+            '-u', usalign]
+    main(args)
+    clusters_dir = out / 'results' / 'clusters'
+
+    def multi_member_clusters(threshold):
+        tsv = pd.read_csv(clusters_dir / f'{threshold}.tsv', sep='\t')
+        tsv = tsv[tsv['ClusterNumber'] != -1]
+        return {frozenset(g['SequenceName']) for _, g in tsv.groupby('ClusterNumber')}
+    assert multi_member_clusters(thresholds[0]) == multi_member_clusters(thresholds[1])
+    assert multi_member_clusters(thresholds[0])
+
+    # A structure that is not an input this time, left in every cluster folder of
+    # the first threshold (the one whose superpositions are reused by the others).
+    for folder in (clusters_dir / thresholds[0]).iterdir():
+        if folder.is_dir() and folder.name != '-1':
+            shutil.copy(src[0], folder / 'stray.pdb')
+    main(args)
+
+    for threshold in thresholds:
+        tsv = pd.read_csv(clusters_dir / f'{threshold}.tsv', sep='\t')
+        for cluster, group in tsv.groupby('ClusterNumber'):
+            folder = clusters_dir / threshold / str(cluster)
+            if threshold != thresholds[0]:
+                assert not (folder / 'stray.pdb').exists(), (threshold, cluster)
+            if cluster == -1:
+                continue
+            afasta = folder / f'threshold_{threshold}_cluster_{cluster}.afasta'
+            names = {line[1:].strip() for line in afasta.read_text().splitlines()
+                     if line.startswith('>')}
+            assert names == set(group['SequenceName']), (threshold, cluster)

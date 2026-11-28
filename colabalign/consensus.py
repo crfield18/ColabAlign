@@ -406,17 +406,18 @@ def _cluster_file(pdb_dir, threshold, cluster_num, suffix):
 
 
 # pylint: disable=too-many-arguments,too-many-positional-arguments
-def process_cluster(pdb_dir: Path, cluster_num, threshold, pair_store, sub_tmmatrix,
-                    refine=True, member_files=None):
+def process_cluster(out_dir: Path, cluster_num, threshold, pair_store, sub_tmmatrix,
+                    member_files, refine=True):
     '''
     Build the MSA/consensus for one cluster and return its representative.
     Runs in a worker process. It receives only this cluster's slice of the
     TM-score matrix, and loads only this cluster's pairs from the PairStore.
-    Sequences come from the superposed PDBs in pdb_dir, or from member_files
-    (the prepared models) when superposition was skipped.
+    Sequences are read from member_files, the cluster members' prepared models,
+    never from whatever happens to be in out_dir: a reused output folder can
+    hold structures from an earlier run. Superposition moves atoms but does not
+    change sequences, so the prepared models give the same alignment.
     '''
-    pdb_files = sorted(member_files, key=lambda p: p.stem) if member_files \
-        else sorted(pdb_dir.glob('*.pdb'))
+    pdb_files = sorted(member_files, key=lambda p: p.stem)
     if not pdb_files:
         return None, cluster_num, threshold
 
@@ -424,7 +425,7 @@ def process_cluster(pdb_dir: Path, cluster_num, threshold, pair_store, sub_tmmat
     library = pair_store.sub_library(list(sequences))
     aligned = build_cluster_alignment(sequences, library, sub_tmmatrix, refine)
     consensus = build_consensus(aligned, threshold=0.6)
-    _write_cluster_outputs(pdb_dir, cluster_num, threshold, aligned, consensus)
+    _write_cluster_outputs(out_dir, cluster_num, threshold, aligned, consensus)
 
     representative = find_nearest_sequence(aligned, consensus)
     return representative, cluster_num, threshold
@@ -434,12 +435,12 @@ class ClusterConsensus:
     '''Builds per-cluster MSAs, consensus sequences, and selects representatives.'''
 
     # pylint: disable=too-many-arguments,too-many-positional-arguments
-    def __init__(self, pair_store, tmmatrix, threads: int = 1, refine: bool = True,
-                 models_by_name=None) -> None:
+    def __init__(self, pair_store, tmmatrix, threads: int = 1, refine: bool = True, *,
+                 models_by_name) -> None:
         '''Store the PairStore, TM-score matrix, and run parameters.
 
-        models_by_name maps structure names to prepared model files. When given,
-        sequences are read from these rather than from the superposed copies.'''
+        models_by_name maps structure names to prepared model files. Each
+        cluster's sequences are read from exactly its members' files.'''
         self.pair_store = pair_store
         self.tmmatrix = tmmatrix
         self.threads = threads
@@ -480,12 +481,11 @@ class ClusterConsensus:
                 threshold_str, cluster_num, pdb_dir, _ = group[0]
                 members = [m for m in sorted(member_set) if m in self.tmmatrix.index]
                 sub_tmmatrix = self.tmmatrix.loc[members, members]
-                member_files = ([self.models_by_name[m] for m in sorted(member_set)]
-                                if self.models_by_name else None)
+                member_files = [self.models_by_name[m] for m in members]
                 pdb_dir.mkdir(parents=True, exist_ok=True)
                 futures[executor.submit(
                     process_cluster, pdb_dir, cluster_num, threshold_str,
-                    self.pair_store, sub_tmmatrix, self.refine, member_files,
+                    self.pair_store, sub_tmmatrix, member_files, self.refine,
                 )] = group
             for future in as_completed(futures):
                 representative, cluster_num, threshold_str = future.result()
