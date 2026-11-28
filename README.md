@@ -2,7 +2,11 @@
 
 ## Fast pairwise protein secondary structure comparisons using multiprocessing
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/crfield18/ColabAlign/blob/main/colabalign.ipynb) [![Code DOI](https://img.shields.io/badge/DOI-10.5281/zenodo.14169501-blue)](https://doi.org/10.5281/zenodo.14169501) [![Paper DOI](https://img.shields.io/badge/DOI-10.1101/2025.10.06.677802-green)](https://doi.org/10.1101/2025.10.06.677802)
+[![License](https://anaconda.org/bioconda/colabalign/badges/license.svg)](https://github.com/crfield18/ColabAlign/blob/main/LICENSE)
+[![Anaconda-Server Badge](https://anaconda.org/bioconda/colabalign/badges/platforms.svg)](https://anaconda.org/bioconda/colabalign)
+[![Install with Bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](http://bioconda.github.io/recipes/colabalign/README.html)
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/crfield18/ColabAlign/blob/main/colabalign.ipynb)
+[![Code DOI](https://img.shields.io/badge/DOI-10.5281/zenodo.14169501-yellow)](https://doi.org/10.5281/zenodo.14169501)
 
 This notebook performs pairwise protein structural alignments using the [US-align](https://zhanggroup.org/US-align/) algorithm by [Zhang _et al._, (2022)](https://doi.org/10.1038/s41592-022-01585-1), then constructs a structure-informed dendrogram using the UPGMA algorithm to visualise similarities.
 
@@ -35,9 +39,9 @@ Further information can be found at: <https://desmid.github.io/mview/manual/manu
 ### Installation for local usage
 
 
-**Conda package (once published).** Installs ColabAlign and all external tools:
+**Conda package ([Bioconda](https://bioconda.github.io/recipes/colabalign/README.html)).** Installs ColabAlign and all external tools:
 
-`conda install -c conda-forge -c bioconda colabalign=1.2.3`
+`conda install -c conda-forge -c bioconda colabalign`
 
 **From source.** Create the environment from the provided [YAML file](colabalign.yml), which includes the external tools, then install the package:
 
@@ -58,8 +62,12 @@ python -m pip install --no-deps --no-build-isolation .
 ### Usage
 
 ```
-colabalign -i structures/ more.zip runs.tar.gz extra.pdb -o results_dir -c 8 -t 0.20 0.30 -m first
+colabalign -i structures/ more.zip runs.tar.gz extra.pdb -o results_dir -c 8 -n 50 -m first
 ```
+
+`-n/--panel-size` is the number of structures you want to select. ColabAlign finds the clustering threshold that gives the closest achievable panel size. Not every size is possible, so the panel can be a little larger or smaller than requested. Give a range such as `-n 40-60` to get every achievable panel size in that range, or several values (`-n 30 50`). `results/panel_sizes.csv` lists every achievable size. You can still set thresholds directly with `-t 0.20 0.30`. With neither option, `-t 0.20` is used.
+
+A panel is one representative from every cluster with two or more members. Singletons (structures too unlike any other to join a cluster) are left out by default. To include some, give part of each panel to **low-coverage structures** with `-l/--low-coverage-fraction`: structures are added one at a time, each the one least similar to the panel so far, taking singletons first and then, if slots remain, outlying members of the clusters. For example, `-l 0.05` gives them 5 % of each panel. The default is `-l 0`. Each panel is written to `results/clusters/<t>/threshold_<t>_panel.csv` and `.fasta`, and `results/panels.csv` summarises them all. Add `--no-superpose` to skip writing superposed structure files when you only need the panels; this is quicker, and the representatives and panels are the same. See the [manual](colabalign/MANUAL.md) for details.
 
 `-i` accepts `.pdb`/`.cif` files, directories of them, and `.zip` or tar archives (`.tar`, `.tar.gz`/`.tgz`, `.tar.bz2`, `.tar.xz`). `python -m colabalign` works too. From Python:
 
@@ -67,7 +75,7 @@ colabalign -i structures/ more.zip runs.tar.gz extra.pdb -o results_dir -c 8 -t 
 from colabalign import ColabAlign
 
 if __name__ == '__main__':
-    ColabAlign(inputs=['structures/'], output='results_dir', cores=8, threshold=[0.2, 0.3]).run()
+    ColabAlign(inputs=['structures/'], output='results_dir', cores=8, panel_size=['40-60']).run()
 ```
 
 #### Inputs with the same name
@@ -115,6 +123,7 @@ BibTeX-formatted references for this project and the associated references can b
 - **ColabAlign (code)**: <https://doi.org/10.5281/ZENODO.14169501>
 - **BioPython**: <https://doi.org/10.1093/bioinformatics/btp163>
 - **SciPy**: <https://doi.org/10.1038/s41592-019-0686-2>
+- **Numba**: <https://doi.org/10.1145/2833157.2833162>
 - **US-align**: <https://doi.org/10.1038/s41592-022-01585-1>
 - **TreeCluster**: <https://doi.org/10.1371/journal.pone.0221068>
 - **MView**: <https://doi.org/10.1093/bioinformatics/14.4.380>

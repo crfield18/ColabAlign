@@ -3,7 +3,6 @@
 from os import cpu_count
 import shutil
 import warnings
-from types import SimpleNamespace
 from pathlib import Path
 from time import time
 
@@ -14,6 +13,12 @@ from .structure_prep import (
 from .usalign_runner import run_pairwise_alignments, check_tm_matrix_completeness
 from .dendrogram import grow_tree as _grow_tree, tree_clustering as _tree_clustering
 from .consensus import ClusterConsensus
+from .panel import (
+    DEFAULT_LOW_COVERAGE_FRACTION, MAX_LOW_COVERAGE_FRACTION, build_panel, choose_cuts,
+    cut_options, format_threshold, parse_panel_size, write_cut_options, write_panel_summary,
+)
+
+DEFAULT_THRESHOLD = 0.20
 
 
 def _require_executable(path: Path, tool: str, flag):
@@ -28,36 +33,61 @@ def _require_executable(path: Path, tool: str, flag):
     return Path(resolved)
 
 
+def _normalise_panel_sizes(panel_size):
+    '''None, 50, "40-60", (40, 60) or a list of these -> list of (min, max) tuples.'''
+    if panel_size is None:
+        return []
+    if isinstance(panel_size, (int, str)) or (
+            isinstance(panel_size, tuple) and all(isinstance(v, int) for v in panel_size)):
+        panel_size = [panel_size]
+    return [parse_panel_size('-'.join(map(str, size)) if isinstance(size, tuple) else size)
+            for size in panel_size]
+
+
 class ColabAlign:
     '''Coordinates structure prep, pairwise alignment, clustering, and consensus selection.'''
 
     # pylint: disable=too-many-arguments,too-many-positional-arguments
-    def __init__(self, inputs, output, cores: int = 1, threshold=(0.20,),
-                 usalign='USalign', beem='BeEM', mode: str = 'all') -> None:
+    def __init__(self, inputs, output, cores: int = 1, threshold=None,
+                 usalign='USalign', beem='BeEM', mode: str = 'all', panel_size=None,
+                 low_coverage_fraction: float = DEFAULT_LOW_COVERAGE_FRACTION,
+                 superpose: bool = True) -> None:
         '''
         Set up output directories and runtime parameters.
 
         inputs: iterable of .pdb/.cif files, directories, or .zip/.tar(.gz) archives.
         output: output directory (created if missing).
-        threshold: one clustering threshold or an iterable of them.
+        threshold: one clustering threshold or an iterable of them. Defaults to
+            0.20 when no panel_size is given.
+        panel_size: desired panel size(s); each an int, a (min, max) tuple or a
+            "MIN-MAX" string. A threshold is chosen for each.
+        low_coverage_fraction: fraction of each panel given to the structures
+            least covered by the cluster representatives.
         mode: 'all' chains or only the 'first' chain of each input.
+        superpose: write cluster members superposed onto their medoid. False
+            skips writing structure files; representatives are unchanged.
         '''
         if mode not in ('all', 'first'):
             raise ValueError(f"mode must be 'all' or 'first', not {mode!r}")
+        if not 0 <= low_coverage_fraction <= MAX_LOW_COVERAGE_FRACTION:
+            raise ValueError(
+                f'low_coverage_fraction must be between 0 and {MAX_LOW_COVERAGE_FRACTION}')
         if isinstance(inputs, (str, Path)):
             inputs = [inputs]
         if isinstance(threshold, (int, float)):
             threshold = [threshold]
-        args = SimpleNamespace(
-            input=[Path(p) for p in inputs], output=Path(output), cores=int(cores),
-            threshold=[float(t) for t in threshold], usalign=Path(usalign),
-            beem=Path(beem), mode=mode,
-        )
-
-        self.thresholds = args.threshold
+        panel_size = _normalise_panel_sizes(panel_size)
+        if threshold is None:
+            threshold = [] if panel_size else [DEFAULT_THRESHOLD]
+        self.thresholds = [float(t) for t in threshold]
+        self.panel_sizes = panel_size
+        self.low_coverage_fraction = float(low_coverage_fraction)
+        self.superpose = bool(superpose)
+        self.requested_by_threshold = {}
+        self.expected_clusters = {}
 
         print('Setting up file structure.')
-        self.home_path = args.output
+        self.home_path = Path(output)
         self.models_path = self.home_path.joinpath('models')
         self.results_path = self.home_path.joinpath('results')
 
@@ -70,11 +100,12 @@ class ColabAlign:
         # Temporary home for the contents of any uploaded .zip/.tar archives;
         # removed once structure preparation has finished with them.
         self.extract_path = self.home_path.joinpath('.extracted_inputs')
-        self.model_list, self.duplicate_rows = collect_input_models(args.input, self.extract_path)
+        self.model_list, self.duplicate_rows = collect_input_models(
+            [Path(p) for p in inputs], self.extract_path)
         if not self.model_list:
             raise SystemExit('No .pdb, .cif, .zip or .tar(.gz) input files found.')
 
-        self.cores = args.cores
+        self.cores = int(cores)
         if self.cores <= 0:
             warnings.warn(
                 'User-defined core count cannot be lower than 1. '
@@ -88,17 +119,18 @@ class ColabAlign:
             )
             self.cores = cpu_count()
 
-        self.usalign_path = _require_executable(args.usalign, 'USalign', '-u/--usalign')
+        self.usalign_path = _require_executable(Path(usalign), 'USalign', '-u/--usalign')
         if any(m.suffix.lower() == '.cif' for m in self.model_list):
-            self.beem_path = _require_executable(args.beem, 'BeEM', '-b/--beem')
+            self.beem_path = _require_executable(Path(beem), 'BeEM', '-b/--beem')
         else:
-            self.beem_path = args.beem  # only needed for .cif inputs
+            self.beem_path = Path(beem)  # only needed for .cif inputs
         _require_executable(Path('TreeCluster.py'), 'TreeCluster.py', None)
-        self.mode = args.mode
+        self.mode = mode
 
         self.tmmatrix = None
         self.pair_store = None
         self.clusters_by_threshold = None
+        self.representatives_by_threshold = None
 
     def prepare_structures(self):
         '''Prepare input models (e.g. chain extraction, format conversion) for alignment.'''
@@ -141,21 +173,76 @@ class ColabAlign:
         '''Build and save the dendrogram from the TM-score matrix.'''
         _grow_tree(self.tmmatrix, self.model_list, self.results_path)
 
+    def choose_thresholds(self):
+        '''Find the threshold(s) giving each requested panel size, and list every
+        achievable panel size in results/panel_sizes.csv.'''
+        options = cut_options(self.results_path.joinpath('colabalign.tree'),
+                              self.low_coverage_fraction)
+        chosen = choose_cuts(options, self.panel_sizes) if self.panel_sizes else []
+        write_cut_options(options, self.results_path.joinpath('panel_sizes.csv'))
+        for option in chosen:
+            threshold = option.threshold
+            key = format_threshold(threshold)
+            self.requested_by_threshold.setdefault(key, []).extend(option.requested)
+            self.expected_clusters[key] = option.n_groups
+            if all(format_threshold(t) != key for t in self.thresholds):
+                self.thresholds.append(threshold)
+            note = '' if all(
+                parse_panel_size(r)[0] <= option.panel_size <= parse_panel_size(r)[1]
+                for r in option.requested
+            ) else ' (closest achievable)'
+            print(f'Panel size {", ".join(option.requested)}: threshold {key} gives '
+                  f'{option.n_clusters} clusters + {option.n_low_coverage} low-coverage '
+                  f'({option.n_singletons} singletons available) = '
+                  f'{option.panel_size} structures{note}.')
+        if self.panel_sizes:
+            print(f'Every achievable panel size is listed in '
+                  f'{self.results_path.joinpath("panel_sizes.csv")}.')
+
     def tree_clustering(self):
         '''Cluster the dendrogram at each configured threshold.'''
         self.clusters_by_threshold = _tree_clustering(
             self.thresholds, self.results_path, self.tmmatrix,
-            self.pair_store, self.model_list, self.models_path
+            self.pair_store, self.model_list, self.models_path, self.superpose
         )
+        for key, expected in self.expected_clusters.items():
+            clusters = self.clusters_by_threshold[key]
+            found = len(clusters.get(-1, [])) + sum(1 for c in clusters if c != -1)
+            if found != expected:
+                print(f'WARNING: threshold {key} gave {found} clusters and singletons, not the '
+                      f'{expected} predicted from the tree. The panel uses the actual clusters.')
 
     def find_representatives(self):
         '''Select and write representative structures for each cluster at each threshold.'''
+        models_by_name = {m.stem: self.models_path.joinpath(m.name) for m in self.model_list}
         reps_parser = ClusterConsensus(
-            pair_store=self.pair_store, tmmatrix=self.tmmatrix, threads=self.cores
+            pair_store=self.pair_store, tmmatrix=self.tmmatrix, threads=self.cores,
+            models_by_name=models_by_name,
         )
-        reps_parser.get_representatives_all_thresholds(
+        self.representatives_by_threshold = reps_parser.get_representatives_all_thresholds(
             self.results_path, self.clusters_by_threshold
             )
+
+    def assemble_panels(self):
+        '''Write each threshold's panel (representatives, singletons and low-coverage
+        additions) and a summary of how well each panel covers every structure.'''
+        models_by_name = {m.stem: self.models_path.joinpath(m.name) for m in self.model_list}
+        rows = []
+        for threshold_str, clusters in self.clusters_by_threshold.items():
+            rows.append(build_panel(
+                threshold_str, clusters, self.representatives_by_threshold.get(threshold_str, {}),
+                self.tmmatrix, self.low_coverage_fraction, models_by_name,
+                self.results_path.joinpath(f'clusters/{threshold_str}'),
+                self.requested_by_threshold.get(threshold_str),
+            ))
+        rows.sort(key=lambda row: row['panel_size'])
+        write_panel_summary(rows, self.results_path.joinpath('panels.csv'))
+        for row in rows:
+            requested = (f' (requested {row["requested_panel_size"]})'
+                         if row['requested_panel_size'] else '')
+            print(f'Threshold {row["threshold"]}: {row["panel_size"]} structures{requested}; '
+                  f'mean best TM-score to the panel {row["mean_best_tm"]:.3f}, '
+                  f'lowest {row["min_best_tm"]:.3f}. See {row["panel_csv"]}.')
 
 
     @classmethod
@@ -163,7 +250,9 @@ class ColabAlign:
         '''Build an instance from an argparse Namespace produced by cli.script_args().'''
         return cls(inputs=args.input, output=args.output, cores=args.cores,
                    threshold=args.threshold, usalign=args.usalign, beem=args.beem,
-                   mode=args.mode)
+                   mode=args.mode, panel_size=args.panel_size,
+                   low_coverage_fraction=args.low_coverage_fraction,
+                   superpose=not args.no_superpose)
 
     def run(self):
         '''Run the full pipeline end-to-end, reporting the elapsed time of each stage.'''
@@ -175,10 +264,13 @@ class ColabAlign:
              'Pairwise alignment'),
             ('Starting dendrogram calculation.', self.grow_tree,
              'Dendrogram calculation'),
+            ('Finding achievable panel sizes.', self.choose_thresholds,
+             'Panel-size sweep'),
             ('Starting dendrogram clustering.', self.tree_clustering,
              'Dendrogram clustering'),
             ('Finding cluster representatives.', self.find_representatives,
              'Representative calculation'),
+            ('Assembling panels.', self.assemble_panels, 'Panel assembly'),
         )
         for start_message, stage, label in stages:
             stage_time_start = time()

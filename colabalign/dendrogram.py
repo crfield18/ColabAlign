@@ -1,5 +1,6 @@
 '''Dendrogram construction, tree clustering, and per-cluster structural superposition.'''
 
+import hashlib
 from math import isnan
 from pathlib import Path
 from shutil import copy
@@ -10,6 +11,8 @@ import pandas as pd
 from Bio import Phylo
 from Bio.Phylo.TreeConstruction import DistanceTreeConstructor, DistanceMatrix
 from Bio.PDB import PDBParser, PDBIO
+
+from .panel import format_threshold
 
 
 
@@ -58,13 +61,32 @@ class StructureAligner:  # pylint: disable=too-few-public-methods
         return self.output_file
 
 
-def grow_tree(tmmatrix: pd.DataFrame, model_list, results_path: Path):
-    '''Build a UPGMA dendrogram from the TM-score matrix and write it as Newick.'''
-    print('Generating structural dendrogram.')
+def _tree_key(distances_df: pd.DataFrame, names) -> str:
+    '''Hash of exactly what the tree is built from: leaf names and rounded distances.'''
+    digest = hashlib.sha256()
+    digest.update('\n'.join(names).encode())
+    digest.update(np.ascontiguousarray(distances_df.to_numpy(dtype=np.float64)).tobytes())
+    return digest.hexdigest()
 
+
+def grow_tree(tmmatrix: pd.DataFrame, model_list, results_path: Path):
+    '''Build a UPGMA dendrogram from the TM-score matrix and write it as Newick.
+
+    The tree is reused when results/colabalign.tree was built from the same
+    names and distances, since Biopython's UPGMA is O(n^3) in pure Python.'''
     distances_df = 1.0000 - tmmatrix
     distances_df = distances_df.round(4)
     distances_df = distances_df.clip(lower=0.0000, upper=1.0000)
+
+    names = [model.stem for model in model_list]
+    tree_path = results_path.joinpath('colabalign.tree')
+    key_path = results_path.joinpath('colabalign.tree.sha256')
+    key = _tree_key(distances_df.loc[names, names], names)
+    if tree_path.is_file() and key_path.is_file() and key_path.read_text().strip() == key:
+        print(f'Reusing the existing dendrogram ({tree_path}): same structures and TM-scores.')
+        return
+    key_path.unlink(missing_ok=True)
+    print('Generating structural dendrogram.')
 
     lower_tri_df = distances_df.where(np.tril(np.ones(distances_df.shape)).astype(bool))
     lower_tri_lists = [
@@ -73,28 +95,30 @@ def grow_tree(tmmatrix: pd.DataFrame, model_list, results_path: Path):
     ]
 
     tm_matrix = DistanceMatrix(
-        names=[model.stem for model in model_list],
+        names=names,
         matrix=lower_tri_lists
     )
     constructor = DistanceTreeConstructor()
     tree = constructor.upgma(tm_matrix)
 
-    Phylo.write(tree, results_path.joinpath('colabalign.tree'), 'newick')
+    Phylo.write(tree, tree_path, 'newick')
+    key_path.write_text(key + '\n')
 
 
 def _run_treecluster(thresholds, results_path: Path):
     '''Run TreeCluster.py once per threshold, raising if any run fails.'''
     for thresh in thresholds:
+        threshold_str = format_threshold(thresh)
         cmd = [
             'TreeCluster.py',
             '-i', results_path.joinpath('colabalign.tree').as_posix(),
-            '-o', results_path.joinpath(f'clusters/{thresh:.2f}.tsv').as_posix(),
-            '-t', f'{thresh:.2f}'
+            '-o', results_path.joinpath(f'clusters/{threshold_str}.tsv').as_posix(),
+            '-t', threshold_str
         ]
         result = subprocess.run(cmd, capture_output=True, check=False)
         if result.returncode != 0:
             raise RuntimeError(
-                f'TreeCluster.py failed for threshold {thresh:.2f} '
+                f'TreeCluster.py failed for threshold {threshold_str} '
                 f'(exit {result.returncode}): {result.stderr.decode(errors="ignore")}'
             )
 
@@ -112,10 +136,10 @@ def _parse_cluster_file(results_path: Path, threshold_str: str):
     return clusters
 
 
-def _copy_unclustered_members(member_names, model_list, models_path, cluster_output_dir):
+def _copy_unclustered_members(member_names, files_by_stem, models_path, cluster_output_dir):
     '''Copy singleton/unclustered (-1) members over without any superposition.'''
     for name in member_names:
-        original_file = next((f for f in model_list if f.stem == name), None)
+        original_file = files_by_stem.get(name)
         if original_file:
             copy(models_path.joinpath(original_file.name),
                  cluster_output_dir.joinpath(original_file.name))
@@ -128,7 +152,7 @@ def _select_medoid(tmmatrix: pd.DataFrame, member_names):
 
 
 def _superpose_member(
-    name, reference_model_name, pair_store, model_list, models_path, cluster_output_dir
+    name, reference_model_name, pair_store, files_by_stem, models_path, cluster_output_dir
     ):
     '''Superpose a single cluster member onto the reference (medoid) structure.'''
     transform_matrix = pair_store.transform(name, reference_model_name)
@@ -138,7 +162,7 @@ def _superpose_member(
             )
         return
 
-    model_file = next((f for f in model_list if f.stem == name), None)
+    model_file = files_by_stem.get(name)
     if model_file is None:
         return
 
@@ -152,10 +176,10 @@ def _superpose_member(
 
 def _process_cluster(cluster_num, member_names, ctx, cluster_output_dir):
     '''Copy the medoid and superpose the rest of a single cluster's members onto it.'''
-    tmmatrix, pair_store, model_list, models_path = ctx
+    tmmatrix, pair_store, files_by_stem, models_path = ctx
 
     if cluster_num == -1:
-        _copy_unclustered_members(member_names, model_list, models_path, cluster_output_dir)
+        _copy_unclustered_members(member_names, files_by_stem, models_path, cluster_output_dir)
         return
 
     # Medoid selection: highest MEAN TM-score to the rest of the cluster,
@@ -163,7 +187,7 @@ def _process_cluster(cluster_num, member_names, ctx, cluster_output_dir):
     # can pick an atypical structure).
     reference_model_name = _select_medoid(tmmatrix, member_names)
 
-    ref_file = next((f for f in model_list if f.stem == reference_model_name), None)
+    ref_file = files_by_stem.get(reference_model_name)
     if ref_file is None:
         return
 
@@ -173,35 +197,59 @@ def _process_cluster(cluster_num, member_names, ctx, cluster_output_dir):
         if name == reference_model_name:
             continue
         _superpose_member(
-            name, reference_model_name, pair_store, model_list, models_path, cluster_output_dir
+            name, reference_model_name, pair_store, files_by_stem, models_path, cluster_output_dir
             )
 
 
 # pylint: disable=too-many-arguments,too-many-positional-arguments
 def tree_clustering(thresholds, results_path: Path, tmmatrix: pd.DataFrame,
-                     pair_store, model_list, models_path: Path):
+                     pair_store, model_list, models_path: Path, superpose: bool = True):
     '''
     Runs TreeCluster.py per threshold, superposes cluster members onto the
     cluster's medoid (highest MEAN TM-score to the rest of the cluster,
     not just the single highest pairwise TM-score), and returns
     dict[threshold_str -> dict[cluster_num -> list of member stems]].
+    With superpose=False, only the cluster directories are created: no
+    structure files are written.
     '''
     print('Calculating clusters from structural tree.')
 
     _run_treecluster(thresholds, results_path)
 
-    ctx = (tmmatrix, pair_store, model_list, models_path)
+    files_by_stem = {f.stem: f for f in model_list}
+    ctx = (tmmatrix, pair_store, files_by_stem, models_path)
     all_clusters_by_threshold = {}
 
+    # Nearby thresholds share most clusters. The medoid and superposition depend
+    # only on the members, so each distinct cluster is superposed once and its
+    # files are copied to the other thresholds.
+    done = {}
     for thresh in thresholds:
-        threshold_str = f'{thresh:.2f}'
+        threshold_str = format_threshold(thresh)
         clusters = _parse_cluster_file(results_path, threshold_str)
+        reused = 0
 
         for cluster_num, member_names in clusters.items():
             cluster_output_dir = results_path.joinpath(f'clusters/{threshold_str}/{cluster_num}')
             cluster_output_dir.mkdir(exist_ok=True, parents=True)
+            if not superpose:
+                continue
+            key = (cluster_num == -1, frozenset(member_names))
+            if cluster_num != -1 and key in done:
+                # Copy only this cluster's members: the earlier folder may also
+                # hold files left over from a previous run into the same output.
+                for name in member_names:
+                    model_file = files_by_stem.get(name)
+                    source = done[key].joinpath(model_file.name) if model_file else None
+                    if source is not None and source.is_file():
+                        copy(source, cluster_output_dir.joinpath(source.name))
+                reused += 1
+                continue
             _process_cluster(cluster_num, member_names, ctx, cluster_output_dir)
+            done[key] = cluster_output_dir
 
         all_clusters_by_threshold[threshold_str] = clusters
+        print(f'Threshold {threshold_str}: {len(clusters)} cluster groups'
+              + (f', {reused} reused from an earlier threshold.' if reused else '.'))
 
     return all_clusters_by_threshold

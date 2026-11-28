@@ -89,3 +89,16 @@ def test_canonical_order_longest_first_ties_by_name():
 def test_tile_pairs_diagonal_and_rectangle():
     assert list(tile_pairs(Tile(0, 3, 0, 3, 3, 0, 0))) == [(0, 1), (0, 2), (1, 2)]
     assert list(tile_pairs(Tile(0, 2, 2, 4, 4, 0, 0))) == [(0, 2), (0, 3), (1, 2), (1, 3)]
+
+
+def test_missing_pairs_listed_in_row_order():
+    import numpy as np
+    import pandas as pd
+    from colabalign.usalign_runner import check_tm_matrix_completeness
+    names = ['a', 'b', 'c', 'd']
+    values = np.ones((4, 4))
+    for i, j in [(0, 3), (1, 2), (2, 3)]:
+        values[i, j] = values[j, i] = np.nan
+    tm = pd.DataFrame(values, index=names, columns=names)
+    assert check_tm_matrix_completeness(tm) == [('a', 'd'), ('b', 'c'), ('c', 'd')]
+    assert check_tm_matrix_completeness(tm.fillna(0.0)) == []

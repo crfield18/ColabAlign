@@ -8,7 +8,7 @@ from colabalign.common import count_residues, extract_sequence
 import csv
 
 from colabalign.structure_prep import (
-    collect_input_models, discover_input_models, write_duplicates_csv, DUPLICATES_CSV_COLUMNS,
+    collect_input_models, write_duplicates_csv, DUPLICATES_CSV_COLUMNS,
     expand_duplicate_rows, prepare_models_with_chains,
 )
 from conftest import make_ca_trace, write_pdb
@@ -64,7 +64,7 @@ def test_discover_mixed_inputs_and_zips(tmp_path):
     loose = tmp_path / 'single.pdb'
     loose.write_text(pdb)
 
-    models = discover_input_models([indir, loose, tmp_path / 'missing'], tmp_path / 'extract')
+    models = collect_input_models([indir, loose, tmp_path / 'missing'], tmp_path / 'extract')[0]
     stems = sorted(m.stem.lower() for m in models)
     assert len(stems) == len(set(stems)) == 5
     assert {'ranked_0', 'single', 'model', 'ranked_0_dup1', 'ranked_0_dup2'} == set(stems)
@@ -74,7 +74,7 @@ def test_discover_mixed_inputs_and_zips(tmp_path):
 
 def test_zip_given_directly(tmp_path):
     z = _zip(tmp_path / 'structures.zip', {'a.pdb': 'END\n', 'b/c.cif': 'data_c\n'})
-    models = discover_input_models([z], tmp_path / 'extract')
+    models = collect_input_models([z], tmp_path / 'extract')[0]
     assert sorted(m.name for m in models) == ['a.pdb', 'c.cif']
 
 
@@ -98,7 +98,7 @@ def _tar(path, members, mode='w:gz'):
 def test_tar_given_directly(tmp_path, name, mode):
     t = _tar(tmp_path / name, {'a.pdb': 'END\n', 'b/c.cif': 'data_c\n',
                                '._a.pdb': 'junk', 'notes.txt': 'skip'}, mode)
-    models = discover_input_models([t], tmp_path / 'extract')
+    models = collect_input_models([t], tmp_path / 'extract')[0]
     assert sorted(m.name for m in models) == ['a.pdb', 'c.cif']
     # extracted under the full archive stem, not 'structures.tar'
     assert all((tmp_path / 'extract' / 'structures') in m.parents for m in models)
@@ -112,7 +112,7 @@ def test_tar_in_directory_dup_suffixes_clashes_and_skips_broken(tmp_path):
     _tar(indir / 'runs.tar.gz', {'./run1/ranked_0.pdb': pdb, 'run2/ranked_0.pdb': pdb,
                                  '__MACOSX/run1/._ranked_0.pdb': 'junk'})
     (indir / 'broken.tar.gz').write_bytes(b'not a tarball')
-    models = discover_input_models([indir], tmp_path / 'extract')
+    models = collect_input_models([indir], tmp_path / 'extract')[0]
     assert sorted(m.stem for m in models) == ['ranked_0', 'ranked_0_dup1', 'ranked_0_dup2']
     assert all(m.exists() for m in models)
 
@@ -129,7 +129,7 @@ def test_tar_rejects_path_traversal_and_links(tmp_path):
         link = tarfile.TarInfo('link.pdb')
         link.type, link.linkname = tarfile.SYMTYPE, '/etc/passwd'
         t.addfile(link)
-    models = discover_input_models([path], tmp_path / 'extract')
+    models = collect_input_models([path], tmp_path / 'extract')[0]
     assert [m.name for m in models] == ['ok.pdb']
     assert not (tmp_path / 'escape.pdb').exists()
     assert not any(p.is_symlink() for p in (tmp_path / 'extract').rglob('*'))
@@ -220,14 +220,13 @@ def test_write_duplicates_csv(tmp_path):
 
 @pytest.mark.parametrize('mode', ['first', 'all'])
 def test_same_size_duplicates_survive_preparation(tmp_path, mode):
-    from colabalign.structure_prep import prepare_models
     for sub, text in (('A', PDB_A), ('B', PDB_B)):
         (tmp_path / sub).mkdir()
         (tmp_path / sub / 'ranked_0.pdb').write_text(text)
-    models = discover_input_models([tmp_path / 'A', tmp_path / 'B'], tmp_path / 'extract')
+    models = collect_input_models([tmp_path / 'A', tmp_path / 'B'], tmp_path / 'extract')[0]
     out = tmp_path / 'models'
     out.mkdir()
-    final = prepare_models(models, out, tmp_path / 'no_beem', mode, 1)
+    final, _ = prepare_models_with_chains(models, out, tmp_path / 'no_beem', mode, 1)
     assert sorted(p.name for p in final) == ['ranked_0A.pdb', 'ranked_0_dup1A.pdb']
 
 

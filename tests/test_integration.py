@@ -195,3 +195,144 @@ def test_end_to_end_duplicate_names(tmp_path, usalign, treecluster, beem):  # py
     assert rows[2]['input_file_path'].endswith('run3.tar.gz:ranked_0.pdb')
     assert {p: p.read_bytes() for p in originals} == originals
     assert not (out / '.extracted_inputs').exists()
+
+
+def test_end_to_end_panel_sizes(tmp_path, usalign, treecluster):  # pylint: disable=unused-argument
+    import csv
+    from colabalign.pipeline import main
+    from conftest import make_structure_set
+
+    src = make_structure_set(tmp_path / 'in', per_family=4)
+    out = tmp_path / 'out'
+    main(['-i', str(tmp_path / 'in'), '-o', str(out), '-c', '2', '-n', '5', '3-8',
+          '-l', '0.5', '-u', usalign])
+
+    results = out / 'results'
+    with open(results / 'panel_sizes.csv', newline='', encoding='utf-8') as f:
+        sweep = list(csv.DictReader(f))
+    assert int(sweep[0]['clusters']) <= len(src) and sweep[-1]['clusters'] == '1'
+    requested = [r for r in sweep if r['requested']]
+    assert requested and all(r['threshold_used'] for r in requested)
+    assert any(3 <= int(r['panel_size']) <= 8 for r in requested)
+    # no default 0.20 run when only -n is given, unless the sweep chose it
+    with open(results / 'panels.csv', newline='', encoding='utf-8') as f:
+        panels = list(csv.DictReader(f))
+    assert {p['threshold'] for p in panels} == {r['threshold_used'] for r in requested}
+    names = set(pd.read_csv(results / 'us-align_score_matrix.csv', index_col=0).index)
+    assert len(names) == len(src)
+    for panel in panels:
+        with open(results / panel['panel_csv'], newline='', encoding='utf-8') as f:
+            rows = list(csv.DictReader(f))
+        members = [r['structure'] for r in rows]
+        assert len(members) == len(set(members)) == int(panel['panel_size'])
+        assert set(members) <= names
+        roles = [r['role'] for r in rows]
+        assert roles.count('low_coverage') == int(panel['low_coverage_additions'])
+        # representatives of multi-member clusters, plus additions: singletons first,
+        # then cluster members only once every singleton is in the panel
+        tsv = pd.read_csv(results / 'clusters' / f"{panel['threshold']}.tsv", sep='\t')
+        singletons = set(tsv.loc[tsv['ClusterNumber'] == -1, 'SequenceName'])
+        assert len(singletons) == int(panel['singletons'])
+        added = [r['structure'] for r in rows if r['role'] == 'low_coverage']
+        assert added[:len(singletons)] == [s for s in added if s in singletons]
+        if len(added) > len(singletons):
+            assert singletons <= set(added)
+        assert int(panel['singletons_in_panel']) == len(singletons & set(added))
+        for r in rows:
+            if r['structure'] in singletons:
+                assert r['role'] == 'low_coverage' and r['cluster'] == '-1'
+        assert sum(int(r['structures_represented']) for r in rows) == len(src)
+        # every cluster directory has all its members, superposed or copied
+        tsv = pd.read_csv(results / 'clusters' / f"{panel['threshold']}.tsv", sep='\t')
+        for cluster, group in tsv.groupby('ClusterNumber'):
+            pdbs = {p.stem for p in (results / 'clusters' / panel['threshold'] / str(cluster))
+                    .glob('*.pdb')}
+            assert pdbs == set(group['SequenceName']), (panel['threshold'], cluster)
+        fasta = (results / panel['panel_csv']).with_suffix('.fasta').read_text()
+        assert fasta.count('>') == len(members)
+        assert float(panel['min_best_tm']) <= float(panel['mean_best_tm']) <= 1
+
+
+def test_end_to_end_default_threshold(tmp_path, usalign, treecluster):  # pylint: disable=unused-argument
+    import csv
+    from colabalign.pipeline import main
+    from conftest import make_structure_set
+
+    make_structure_set(tmp_path / 'in')
+    out = tmp_path / 'out'
+    main(['-i', str(tmp_path / 'in'), '-o', str(out), '-c', '2', '-u', usalign])
+    results = out / 'results'
+    assert (results / 'clusters' / '0.20.tsv').is_file()
+    assert (results / 'clusters' / '0.20' / 'threshold_0.20_panel.csv').is_file()
+    assert (results / 'panels.csv').is_file() and (results / 'panel_sizes.csv').is_file()
+    with open(results / 'panels.csv', newline='', encoding='utf-8') as f:
+        assert [row['low_coverage_additions'] for row in csv.DictReader(f)] == ['0']  # -l 0 default
+
+
+def test_no_superpose_gives_same_panels(tmp_path, usalign, treecluster):  # pylint: disable=unused-argument
+    from colabalign.pipeline import main
+    from conftest import make_structure_set
+
+    make_structure_set(tmp_path / 'in', per_family=4)
+    runs = {}
+    for name, extra in (('with', []), ('without', ['--no-superpose'])):
+        out = tmp_path / name
+        main(['-i', str(tmp_path / 'in'), '-o', str(out), '-c', '2', '-n', '4-8',
+              '-u', usalign, *extra])
+        runs[name] = out / 'results'
+    clusters = {name: results / 'clusters' for name, results in runs.items()}
+    assert list(clusters['with'].rglob('*.pdb'))
+    assert not list(clusters['without'].rglob('*.pdb'))
+    for pattern in ('*_cluster_representatives.fasta', '*_panel.csv', '*_panel.fasta', '*.afasta'):
+        with_files = sorted(p.relative_to(clusters['with']) for p in clusters['with'].rglob(pattern))
+        assert with_files
+        assert with_files == sorted(p.relative_to(clusters['without'])
+                                    for p in clusters['without'].rglob(pattern))
+        for rel in with_files:
+            assert (clusters['with'] / rel).read_text() == (clusters['without'] / rel).read_text()
+    assert (runs['with'] / 'panels.csv').read_text() == (runs['without'] / 'panels.csv').read_text()
+
+
+def test_rerun_ignores_stray_files_in_cluster_folders(tmp_path, usalign, treecluster):  # pylint: disable=unused-argument
+    '''Files left in results/clusters/ by an earlier run must not enter the
+    alignments, nor be copied to other thresholds' cluster folders.'''
+    import shutil
+    from colabalign.pipeline import main
+    from conftest import make_structure_set
+
+    src = make_structure_set(tmp_path / 'in', per_family=4)
+    out = tmp_path / 'out'
+    # Two thresholds that give the same clusters, so the second reuses the
+    # first's superposed files.
+    thresholds = ['0.64', '0.66']
+    args = ['-i', str(tmp_path / 'in'), '-o', str(out), '-c', '2', '-t', *thresholds,
+            '-u', usalign]
+    main(args)
+    clusters_dir = out / 'results' / 'clusters'
+
+    def multi_member_clusters(threshold):
+        tsv = pd.read_csv(clusters_dir / f'{threshold}.tsv', sep='\t')
+        tsv = tsv[tsv['ClusterNumber'] != -1]
+        return {frozenset(g['SequenceName']) for _, g in tsv.groupby('ClusterNumber')}
+    assert multi_member_clusters(thresholds[0]) == multi_member_clusters(thresholds[1])
+    assert multi_member_clusters(thresholds[0])
+
+    # A structure that is not an input this time, left in every cluster folder of
+    # the first threshold (the one whose superpositions are reused by the others).
+    for folder in (clusters_dir / thresholds[0]).iterdir():
+        if folder.is_dir() and folder.name != '-1':
+            shutil.copy(src[0], folder / 'stray.pdb')
+    main(args)
+
+    for threshold in thresholds:
+        tsv = pd.read_csv(clusters_dir / f'{threshold}.tsv', sep='\t')
+        for cluster, group in tsv.groupby('ClusterNumber'):
+            folder = clusters_dir / threshold / str(cluster)
+            if threshold != thresholds[0]:
+                assert not (folder / 'stray.pdb').exists(), (threshold, cluster)
+            if cluster == -1:
+                continue
+            afasta = folder / f'threshold_{threshold}_cluster_{cluster}.afasta'
+            names = {line[1:].strip() for line in afasta.read_text().splitlines()
+                     if line.startswith('>')}
+            assert names == set(group['SequenceName']), (threshold, cluster)

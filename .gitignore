@@ -6,3 +6,6 @@ dist/
 *.patch
 .pytest_cache
 benchmarks/*
+*.svg
+profile_cluster.py
+*.prof

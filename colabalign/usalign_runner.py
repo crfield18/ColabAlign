@@ -497,11 +497,6 @@ def run_pairwise_alignments(model_list, usalign_path, cores, cache_dir,
 def check_tm_matrix_completeness(tmmatrix):
     '''Returns list of (row, col) label pairs where the matrix has a NaN,
     excluding the diagonal. Call this before building the tree.'''
-    missing = []
-    n = tmmatrix.shape[0]
+    rows, cols = np.nonzero(np.triu(np.isnan(tmmatrix.to_numpy(dtype=float)), k=1))
     labels = tmmatrix.index
-    for i in range(n):
-        for j in range(i + 1, n):
-            if pd.isna(tmmatrix.iat[i, j]):
-                missing.append((labels[i], labels[j]))
-    return missing
+    return [(labels[i], labels[j]) for i, j in zip(rows, cols)]
