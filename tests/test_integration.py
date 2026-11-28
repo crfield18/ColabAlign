@@ -205,7 +205,7 @@ def test_end_to_end_panel_sizes(tmp_path, usalign, treecluster):  # pylint: disa
     src = make_structure_set(tmp_path / 'in', per_family=4)
     out = tmp_path / 'out'
     main(['-i', str(tmp_path / 'in'), '-o', str(out), '-c', '2', '-n', '5', '3-8',
-          '-l', '0.2', '-u', usalign])
+          '-l', '0.5', '-u', usalign])
 
     results = out / 'results'
     with open(results / 'panel_sizes.csv', newline='', encoding='utf-8') as f:
@@ -228,8 +228,19 @@ def test_end_to_end_panel_sizes(tmp_path, usalign, treecluster):  # pylint: disa
         assert set(members) <= names
         roles = [r['role'] for r in rows]
         assert roles.count('low_coverage') == int(panel['low_coverage_additions'])
-        # singletons are already panel members, so additions come from real clusters
-        assert all(r['cluster'] != '-1' for r in rows if r['role'] == 'low_coverage')
+        # representatives of multi-member clusters, plus additions: singletons first,
+        # then cluster members only once every singleton is in the panel
+        tsv = pd.read_csv(results / 'clusters' / f"{panel['threshold']}.tsv", sep='\t')
+        singletons = set(tsv.loc[tsv['ClusterNumber'] == -1, 'SequenceName'])
+        assert len(singletons) == int(panel['singletons'])
+        added = [r['structure'] for r in rows if r['role'] == 'low_coverage']
+        assert added[:len(singletons)] == [s for s in added if s in singletons]
+        if len(added) > len(singletons):
+            assert singletons <= set(added)
+        assert int(panel['singletons_in_panel']) == len(singletons & set(added))
+        for r in rows:
+            if r['structure'] in singletons:
+                assert r['role'] == 'low_coverage' and r['cluster'] == '-1'
         assert sum(int(r['structures_represented']) for r in rows) == len(src)
         # every cluster directory has all its members, superposed or copied
         tsv = pd.read_csv(results / 'clusters' / f"{panel['threshold']}.tsv", sep='\t')

@@ -37,7 +37,7 @@ At a high level, ColabAlign:
 4. superposes each cluster's members onto a central structure (the medoid);
 5. builds a structure-informed MSA for each cluster from the US-align residue correspondences;
 6. selects the sequence closest to the cluster consensus as the representative;
-7. assembles a panel from the representatives and singletons, topped up with the structures the panel covers least well.
+7. assembles a panel from the representatives of clusters with two or more members, optionally topped up with the structures the panel covers least well, singletons first.
 
 All stages that can run in parallel are spread across CPU cores with `ProcessPoolExecutor`. This covers structure preparation, pairwise alignment and the per-cluster MSAs.
 
@@ -56,7 +56,7 @@ flowchart TD
     F --> G["Stage 5: Superpose members<br/>onto cluster medoid"]
     G --> H["Stage 6: Progressive profile MSA<br/>from US-align residue library + refinement"]
     H --> I["Stage 7: Consensus (τ = 0.6)<br/>→ representative per cluster"]
-    I --> J["Panel: representatives + singletons<br/>+ low-coverage additions"]
+    I --> J["Panel: representatives<br/>+ optional low-coverage additions"]
 ```
 
 The code is organised as follows:
@@ -306,13 +306,16 @@ TreeCluster labels any leaf that ends up in a cluster of size one with **`-1`**,
 
 ### 6.1 Choosing $t$ from a panel size
 
-With `-n/--panel-size`, ColabAlign chooses $t$ itself. Each internal node $v$ of the tree has a diameter $\Delta_v$, the largest leaf-to-leaf distance within its clade, computed exactly as TreeCluster computes it from the written Newick file. Diameters never decrease towards the root, so at threshold $t$ the number of clusters (counting each singleton as one) is
+With `-n/--panel-size`, ColabAlign chooses $t$ itself. Each internal node $v$ of the tree has a diameter $\Delta_v$, the largest leaf-to-leaf distance within its clade, computed exactly as TreeCluster computes it from the written Newick file. Diameters never decrease towards the root. When $t$ reaches $\Delta_v$, the children of $v$ merge into one cluster: its leaf children stop being singletons, and its internal children, each already a cluster, become one. So at threshold $t$, with $L_v$ and $I_v$ the numbers of leaf and internal children of $v$, the number of clusters with two or more members and the number of singletons are
 
 $$
-K(t) \;=\; n \;-\; \sum_{v:\ \Delta_v \le t} \big(\text{children}(v) - 1\big).
+K(t) \;=\; \sum_{v:\ \Delta_v \le t} \big(1 - I_v\big), \qquad
+S(t) \;=\; n \;-\; \sum_{v:\ \Delta_v \le t} L_v .
 $$
 
-Sweeping the sorted diameters lists every cluster count the tree can give, and the range of $t$ that gives it, without running TreeCluster for each candidate. The panel size for $K$ clusters is $K + a(K)$, where $a(K)$ is the number of low-coverage additions (§9.3). For each request:
+Sweeping the sorted diameters lists every clustering the tree can give, and the range of $t$ that gives it, without running TreeCluster for each candidate. The panel size is $K + a(K)$, where $a(K)$ is the number of low-coverage additions (§9.3).
+
+$K(t)$ is not monotonic. From $t = 0$, it first rises as singletons pair up, then falls as clusters merge. The same panel size can therefore come from a low threshold, where most structures are still singletons and left out of the panel, or a higher one. Only cuts from the peak of $K(t)$ upwards are offered, and where two of those give the same panel size, the one with fewer singletons is used. The largest panel available is the peak $K$ plus its additions. For each request:
 
 - **`-n N`** uses the cut whose panel size is closest to $N$. On a tie, the smaller panel wins.
 - **`-n MIN-MAX`** uses every cut whose panel size lies in the range. If none does, it uses the closest one.
@@ -489,9 +492,9 @@ results/clusters/<t>/threshold_<t>_cluster_representatives.fasta
 
 **Module:** `panel.py`
 
-The panel for threshold $t$ starts with one structure per cluster: each cluster's representative and every singleton. If a cluster has no representative, its medoid is used and a warning is printed. Call this set $P$ and its size $K$.
+The panel for threshold $t$ starts with the representative of every cluster with two or more members. If a cluster has no representative, its medoid is used and a warning is printed. Call this set $P$ and its size $K$. Singletons (cluster `-1`) are not included automatically.
 
-The **coverage** of structure $i$ is its best TM-score to any panel member, $c_i = \max_{j \in P} T_{ij}$, so panel members have $c_i = 1$. Because clusters are defined by linkage averages (§6), some members of large clusters can be poorly matched by their representative. The panel is topped up with $a$ of them, farthest-first: add $\arg\min_{i \notin P} c_i$, update every $c_i$, and repeat. Updating after each addition stops two near-identical outliers both being added. Ties go to the first name alphabetically.
+The **coverage** of structure $i$ is its best TM-score to any panel member, $c_i = \max_{j \in P} T_{ij}$, so panel members have $c_i = 1$. Singletons are the structures least like any cluster, so they are the ones a cluster-only panel covers worst. The panel can be topped up with $a$ low-coverage additions, farthest-first: add $\arg\min_{i \in S \setminus P} c_i$, where $S$ is the set of singletons, update every $c_i$, and repeat. Once every singleton is in the panel, any remaining additions are chosen the same way from the members of the clusters: $\arg\min_{i \notin P} c_i$. These are outliers within large clusters, which their representative matches poorly because clusters are defined by linkage averages (§6). Updating after each addition stops two near-identical structures both being added. Ties go to the first name alphabetically.
 
 `-l/--low-coverage-fraction` sets the share $f$ of the final panel given to these additions (default 0, no additions):
 
@@ -499,7 +502,7 @@ $$
 a(K) \;=\; \min\!\left(\left\lfloor \frac{f K}{1 - f} + \tfrac12 \right\rfloor,\ n - K\right),
 $$
 
-so that $a / (K + a) \approx f$. With $f = 0.05$, a 57-cluster cut gets 3 additions (panel of 60) and a cut with 9 or fewer clusters gets none. Singletons are already panel members ($c_i = 1$), so additions always come from clusters with two or more members.
+so that $a / (K + a) \approx f$. With $f = 0.05$, a 57-cluster cut gets 3 additions (panel of 60), and a cut with 9 or fewer clusters gets none. Singletons that are not added are left out of the panel; `results/panels.csv` gives how many there were and how many were added.
 
 For each threshold, the panel is written to `clusters/<t>/threshold_<t>_panel.csv` (one row per member: role, cluster, cluster size, how many structures it is the best match for, and, for additions, its coverage when it was added) and `threshold_<t>_panel.fasta`. `results/panels.csv` summarises every panel: its size, composition, and the mean, 10th percentile and minimum of $c_i$ over all $n$ structures. Panel members are included in these, with $c_i = 1$.
 
@@ -589,7 +592,7 @@ These are properties of the current implementation that affect how the results s
 
 - **The tree uses WPGMA, not size-weighted UPGMA.** As described in §5.2, Biopython's `upgma` averages the two merged sides equally. The per-cluster guide tree (§8.2) *does* use size-weighted UPGMA.
 - **Missing pairs are treated as unrelated.** A failed alignment is set to $T = 0$ ($D = 1$). This can separate structures that would otherwise cluster together, so check the warning list after each run.
-- **Singletons are not in the representatives file.** Cluster `-1` is skipped in Stages 6 and 7, so `threshold_<t>_cluster_representatives.fasta` lists only clusters with two or more members. Each singleton is its own representative and can be found in `clusters/<t>/-1/`. The panel files (§9.3) include singletons.
+- **Singletons are not in the representatives file.** Cluster `-1` is skipped in Stages 6 and 7, so `threshold_<t>_cluster_representatives.fasta` lists only clusters with two or more members. Singletons are listed in `clusters/<t>.tsv` (and copied to `clusters/<t>/-1/` unless `--no-superpose` is given). They enter the panel only as low-coverage additions, ahead of any cluster members (§9.3).
 - **Clusters shared between thresholds are aligned once.** When several thresholds give a cluster with the same members, as nearby thresholds in a `-n MIN-MAX` sweep usually do, its MSA is built once and the files are copied under each threshold's names.
 - **The consensus ignores how many sequences have a gap.** In §9.1, $\tau$ is measured over non-gap residues only. In a column where a single sequence has an insertion, that residue is 100 % of $G_k$ and becomes the consensus symbol, so the sequence with the insertion gains +1 there and every gapped sequence loses 1. Representative selection can therefore favour sequences with unique insertions.
 - **Thresholds are linkage averages.** §6 explains why some individual pairs within a cluster can fall below $1 - t$.

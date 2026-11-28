@@ -184,7 +184,7 @@ class ColabAlign:
             threshold = option.threshold
             key = format_threshold(threshold)
             self.requested_by_threshold.setdefault(key, []).extend(option.requested)
-            self.expected_clusters[key] = option.n_clusters
+            self.expected_clusters[key] = option.n_groups
             if all(format_threshold(t) != key for t in self.thresholds):
                 self.thresholds.append(threshold)
             note = '' if all(
@@ -193,7 +193,8 @@ class ColabAlign:
             ) else ' (closest achievable)'
             print(f'Panel size {", ".join(option.requested)}: threshold {key} gives '
                   f'{option.n_clusters} clusters + {option.n_low_coverage} low-coverage '
-                  f'= {option.panel_size} structures{note}.')
+                  f'({option.n_singletons} singletons available) = '
+                  f'{option.panel_size} structures{note}.')
         if self.panel_sizes:
             print(f'Every achievable panel size is listed in '
                   f'{self.results_path.joinpath("panel_sizes.csv")}.')
@@ -208,7 +209,7 @@ class ColabAlign:
             clusters = self.clusters_by_threshold[key]
             found = len(clusters.get(-1, [])) + sum(1 for c in clusters if c != -1)
             if found != expected:
-                print(f'WARNING: threshold {key} gave {found} clusters, not the '
+                print(f'WARNING: threshold {key} gave {found} clusters and singletons, not the '
                       f'{expected} predicted from the tree. The panel uses the actual clusters.')
 
     def find_representatives(self):

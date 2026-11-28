@@ -1,16 +1,19 @@
 '''Panel-size targeting and panel assembly.
 
-A panel is one structure per cluster (the cluster representative, or the
-structure itself for a singleton) plus a few low-coverage additions: the
-structures least well represented by the cluster panel, added farthest-first.
+A panel is the representative of every cluster with two or more members,
+plus optional low-coverage additions, added farthest-first: each is the
+structure least similar to the panel so far. Additions come from the
+singletons (cluster -1) first; once every singleton is in the panel, any
+remaining additions come from the other members of the clusters.
 
 Choosing a threshold for a requested panel size reproduces TreeCluster's
 max_clade rule on the written Newick tree. Every clade has a maximum pairwise
 leaf distance (its diameter); the clusters at threshold t are the largest clades
-with a diameter of at most t. Diameters never decrease towards the root, so the
-cluster count falls by (children - 1) each time t reaches an internal node's
-diameter. Sweeping those diameters gives every cluster count the tree can
-produce, without running TreeCluster once per candidate threshold.
+with a diameter of at most t. Diameters never decrease towards the root, so as
+t reaches an internal node's diameter, that node's children merge into one
+cluster: its leaf children stop being singletons, and its internal children
+(each already a cluster) become one. Sweeping those diameters gives every
+clustering the tree can produce, without running TreeCluster for each one.
 '''
 
 import csv
@@ -18,6 +21,7 @@ from dataclasses import dataclass, field
 from math import floor, inf
 
 import numpy as np
+import pandas as pd
 from Bio import Phylo
 
 from .common import extract_sequence
@@ -59,16 +63,18 @@ def format_threshold(threshold):
     return repr(threshold)
 
 
-def low_coverage_count(n_clusters, fraction, pool_size):
-    '''Additions so that they make up `fraction` of the final panel (rounded half up).'''
+def low_coverage_count(n_clusters, fraction, n_available):
+    '''Additions so that they make up `fraction` of the final panel (rounded
+    half up), limited by the structures not already in the panel.'''
     if fraction <= 0:
         return 0
     wanted = floor(fraction * n_clusters / (1 - fraction) + 0.5)
-    return max(0, min(wanted, pool_size - n_clusters))
+    return max(0, min(wanted, n_available))
 
 
 def _clade_diameters(tree_path):
-    '''Leaf count and the diameter of every internal node with its number of children.
+    '''Leaf count, and for every internal node its diameter, number of leaf
+    children and number of internal children.
 
     Mirrors TreeCluster.min_clusters_threshold_max_clade, including its order of
     floating-point additions, so threshold comparisons agree with TreeCluster.
@@ -89,22 +95,29 @@ def _clade_diameters(tree_path):
                 second = dist
         leaf_dist[node] = best
         max_pair[node] = max([max_pair[c] for c in node.clades] + [best + second])
-        internal.append((max_pair[node], len(node.clades)))
+        leaves = sum(1 for c in node.clades if c.is_terminal())
+        internal.append((max_pair[node], leaves, len(node.clades) - leaves))
     return len(tree.get_terminals()), internal
 
 
 @dataclass
-class CutOption:
+class CutOption:  # pylint: disable=too-many-instance-attributes
     '''One achievable clustering of the tree.'''
-    n_clusters: int
-    threshold_min: float      # smallest threshold that gives n_clusters
-    threshold_max: float      # thresholds below this value give n_clusters
-    n_low_coverage: int
+    n_clusters: int           # clusters with two or more members
+    n_singletons: int         # cluster -1
+    threshold_min: float      # smallest threshold that gives this clustering
+    threshold_max: float      # thresholds below this value give it
+    n_low_coverage: int       # low-coverage additions (singletons first)
     requested: list = field(default_factory=list)
 
     @property
+    def n_groups(self):
+        '''Clusters plus singletons: TreeCluster's group count.'''
+        return self.n_clusters + self.n_singletons
+
+    @property
     def panel_size(self):
-        '''Clusters plus low-coverage additions.'''
+        '''Cluster representatives plus low-coverage additions.'''
         return self.n_clusters + self.n_low_coverage
 
     @property
@@ -126,21 +139,29 @@ class CutOption:
 
 
 def cut_options(tree_path, low_coverage_fraction=DEFAULT_LOW_COVERAGE_FRACTION):
-    '''Every distinct cluster count the tree can give, smallest threshold first.'''
+    '''Every clustering the tree can give, smallest threshold first, from the
+    threshold with the most multi-member clusters upwards.
+
+    Below that threshold, raising it pairs up singletons; above it, clusters
+    merge. The same panel size can come from either side, but below the peak
+    most structures are singletons, so those cuts are not offered.'''
     n_leaves, internal = _clade_diameters(tree_path)
-    drops = {}
-    for diameter, n_children in internal:
-        drops[diameter] = drops.get(diameter, 0) + n_children - 1
-    options, n_clusters, start = [], n_leaves, 0.0
-    for diameter in sorted(drops):
+    events = {}
+    for diameter, leaf_children, internal_children in internal:
+        clusters, singletons = events.get(diameter, (0, 0))
+        events[diameter] = (clusters + 1 - internal_children, singletons - leaf_children)
+    cuts, clusters, singletons, start = [], 0, n_leaves, 0.0
+    for diameter in sorted(events):
         if diameter > start:
-            options.append((n_clusters, start, diameter))
-        n_clusters -= drops[diameter]
+            cuts.append((clusters, singletons, start, diameter))
+        clusters += events[diameter][0]
+        singletons += events[diameter][1]
         start = max(start, diameter)
-    options.append((n_clusters, start, inf))
+    cuts.append((clusters, singletons, start, inf))
+    peak = max(range(len(cuts)), key=lambda i: (cuts[i][0], -i))
     return [
-        CutOption(k, low, high, low_coverage_count(k, low_coverage_fraction, n_leaves))
-        for k, low, high in options if k >= 1
+        CutOption(k, s1, low, high, low_coverage_count(k, low_coverage_fraction, n_leaves - k))
+        for k, s1, low, high in cuts[peak:]
     ]
 
 
@@ -148,9 +169,9 @@ def choose_cuts(options, panel_sizes):
     '''Pick the cuts for each requested (min, max) panel size.
 
     Every cut whose panel size lies in the range is kept. If none does, the cut
-    closest to the range is used, preferring the smaller panel on a tie.
-    Where several cuts give the same panel size, the one with most clusters is kept.
-    '''
+    closest to the range is used, preferring the smaller panel on a tie. Where
+    several cuts give the same panel size, the one with fewest singletons (the
+    highest threshold) is kept, so the fewest structures are left unclustered.'''
     chosen = {}
     for low, high in panel_sizes:
         label = str(low) if low == high else f'{low}-{high}'
@@ -158,19 +179,17 @@ def choose_cuts(options, panel_sizes):
         if not hits:
             def gap(option):
                 size = option.panel_size
-                return (low - size if size < low else size - high, size)
+                return (low - size if size < low else size - high, size, option.n_singletons)
             hits = [min(options, key=gap)]
-        # Near the top of the tree, the pool-size cap can give several cuts the same
-        # panel size; keep the one with the most clusters (fewest additions).
         by_size = {}
         for option in hits:
             best = by_size.get(option.panel_size)
-            if best is None or option.n_clusters > best.n_clusters:
+            if best is None or option.n_singletons < best.n_singletons:
                 by_size[option.panel_size] = option
         for option in by_size.values():
             option.requested.append(label)
-            chosen[option.n_clusters] = option
-    return sorted(chosen.values(), key=lambda o: o.n_clusters)
+            chosen[option.threshold_min] = option
+    return sorted(chosen.values(), key=lambda o: o.threshold_min)
 
 
 def write_cut_options(options, path):
@@ -178,29 +197,31 @@ def write_cut_options(options, path):
     with open(path, 'w', newline='', encoding='utf-8') as handle:
         writer = csv.writer(handle)
         writer.writerow([
-            'panel_size', 'clusters', 'low_coverage_additions',
+            'panel_size', 'clusters', 'low_coverage_additions', 'singletons',
             'threshold_from', 'threshold_below', 'threshold_used', 'requested',
         ])
-        for option in sorted(options, key=lambda o: o.n_clusters, reverse=True):
+        for option in options:
             used = format_threshold(option.threshold) if option.requested else ''
             writer.writerow([
-                option.panel_size, option.n_clusters, option.n_low_coverage,
+                option.panel_size, option.n_clusters, option.n_low_coverage, option.n_singletons,
                 f'{option.threshold_min:.6g}',
                 '' if option.threshold_max == inf else f'{option.threshold_max:.6g}',
                 used, ';'.join(option.requested),
             ])
 
 
-def add_low_coverage(tmmatrix, panel, n_additions):
-    '''Farthest-first additions: repeatedly add the structure whose best TM-score
-    to the current panel is lowest. Ties go to the first name alphabetically.
+def add_low_coverage(tmmatrix, panel, n_additions, candidates):
+    '''Farthest-first additions from `candidates`: repeatedly add the candidate
+    whose best TM-score to the current panel is lowest. Ties go to the first
+    name alphabetically. With an empty panel, the first pick is the first name.
     Returns [(name, best TM-score to the panel before it was added)].'''
     names = sorted(tmmatrix.index)
     scores = tmmatrix.loc[names, names].to_numpy(dtype=float)
     index = {name: i for i, name in enumerate(names)}
     members = [index[name] for name in panel]
     coverage = scores[:, members].max(axis=1) if members else np.full(len(names), -inf)
-    available = np.ones(len(names), dtype=bool)
+    available = np.zeros(len(names), dtype=bool)
+    available[[index[name] for name in candidates]] = True
     available[members] = False
     added = []
     while len(added) < n_additions and available.any():
@@ -219,14 +240,14 @@ def _medoid(tmmatrix, members):
 # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
 def build_panel(threshold_str, clusters, representatives, tmmatrix, low_coverage_fraction,
                 models_by_name, out_dir, requested=None):
-    '''Assemble, score and write one threshold's panel. Returns a summary row.'''
+    '''Assemble, score and write one threshold's panel. Returns a summary row.
+
+    The panel is the representative of every cluster with two or more members,
+    plus low-coverage additions: singletons (cluster -1) first, then, once all
+    singletons are in, the least-covered members of the clusters.'''
     rows = []
-    for cluster_num in sorted(clusters):
+    for cluster_num in sorted(c for c in clusters if c != -1):
         members = clusters[cluster_num]
-        if cluster_num == -1:
-            rows.extend({'structure': name, 'role': 'singleton', 'cluster': -1,
-                         'cluster_size': 1} for name in sorted(members))
-            continue
         entry = representatives.get(cluster_num)
         if entry is not None:
             name, role = entry['record_name'], 'cluster_representative'
@@ -238,17 +259,27 @@ def build_panel(threshold_str, clusters, representatives, tmmatrix, low_coverage
                      'cluster_size': len(members)})
 
     n_clusters = len(rows)
-    n_low = low_coverage_count(n_clusters, low_coverage_fraction, len(tmmatrix))
+    singletons = sorted(clusters.get(-1, []))
+    n_low = low_coverage_count(n_clusters, low_coverage_fraction, len(tmmatrix) - n_clusters)
     cluster_of = {name: num for num, members in clusters.items() for name in members}
-    for name, before in add_low_coverage(tmmatrix, [r['structure'] for r in rows], n_low):
-        cluster = cluster_of[name]  # never a singleton: those are already in the panel
-        rows.append({'structure': name, 'role': 'low_coverage', 'cluster': cluster,
-                     'cluster_size': len(clusters[cluster]), 'tm_to_panel_before': before})
+    # Singletons first; any slots left over go to the least-covered cluster members.
+    for pool in (singletons, sorted(tmmatrix.index)):
+        panel = [r['structure'] for r in rows]
+        wanted = n_low - (len(rows) - n_clusters)
+        for name, before in add_low_coverage(tmmatrix, panel, wanted, candidates=pool):
+            cluster = cluster_of[name]
+            rows.append({'structure': name, 'role': 'low_coverage', 'cluster': cluster,
+                         'cluster_size': 1 if cluster == -1 else len(clusters[cluster]),
+                         'tm_to_panel_before': before})
 
     panel = [r['structure'] for r in rows]
-    best = tmmatrix.loc[:, panel].max(axis=1)
-    nearest = tmmatrix.loc[:, panel].idxmax(axis=1)
-    represented = nearest.value_counts()
+    if panel:
+        best = tmmatrix.loc[:, panel].max(axis=1)
+        represented = tmmatrix.loc[:, panel].idxmax(axis=1).value_counts()
+    else:
+        print(f'Warning: threshold {threshold_str} gives no clusters with two or more '
+              f'members, so its panel is empty.')
+        best, represented = pd.Series(np.nan, index=tmmatrix.index), pd.Series(dtype=int)
     for row in rows:
         row['structures_represented'] = int(represented.get(row['structure'], 0))
 
@@ -271,11 +302,12 @@ def build_panel(threshold_str, clusters, representatives, tmmatrix, low_coverage
         'threshold': threshold_str,
         'requested_panel_size': ';'.join(requested or []),
         'panel_size': len(rows),
-        'clusters': sum(r['role'] in ('cluster_representative', 'cluster_medoid') for r in rows),
-        'singletons': sum(r['role'] == 'singleton' for r in rows),
+        'clusters': n_clusters,
         'low_coverage_additions': len(rows) - n_clusters,
+        'singletons': len(singletons),
+        'singletons_in_panel': sum(r['cluster'] == -1 for r in rows),
         'mean_best_tm': float(best.mean()),
-        'p10_best_tm': float(np.quantile(best, 0.1)),
+        'p10_best_tm': float(best.quantile(0.1)),
         'min_best_tm': float(best.min()),
         'panel_csv': f'clusters/{threshold_str}/{stem}.csv',
     }

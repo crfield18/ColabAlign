@@ -33,11 +33,12 @@ def _tree(tmp_path, n, seed):
     return tm, tmp_path / 'colabalign.tree'
 
 
-def _treecluster_count(tree, threshold):
+def _treecluster_groups(tree, threshold):
+    '''(clusters with two or more members, singletons) from TreeCluster.py.'''
     out = subprocess.run(['TreeCluster.py', '-i', str(tree), '-t', format_threshold(threshold)],
                          capture_output=True, text=True, check=True).stdout.splitlines()[1:]
     labels = [line.split('\t')[1] for line in out]
-    return labels.count('-1') + len(set(labels) - {'-1'})
+    return len(set(labels) - {'-1'}), labels.count('-1')
 
 
 @pytest.mark.skipif(shutil.which('TreeCluster.py') is None, reason='TreeCluster.py not on PATH')
@@ -45,13 +46,25 @@ def _treecluster_count(tree, threshold):
 def test_cut_options_match_treecluster(tmp_path, n, seed):
     _, tree = _tree(tmp_path, n, seed)
     options = cut_options(tree, 0.0)
-    counts = [o.n_clusters for o in options]
-    assert counts == sorted(counts, reverse=True) and len(set(counts)) == len(counts)
-    assert counts[0] <= n and counts[-1] == 1
+    groups = [o.n_groups for o in options]
+    assert groups == sorted(groups, reverse=True) and len(set(groups)) == len(groups)
+    assert groups[-1] == 1 and (options[-1].n_clusters, options[-1].n_singletons) == (1, 0)
+    # the first cut offered has the most multi-member clusters
+    assert options[0].n_clusters == max(o.n_clusters for o in options)
     rng = np.random.default_rng(seed)
     for option in rng.choice(options, size=min(12, len(options)), replace=False):
         assert option.threshold_min <= option.threshold < option.threshold_max
-        assert _treecluster_count(tree, option.threshold) == option.n_clusters
+        assert _treecluster_groups(tree, option.threshold) == (option.n_clusters, option.n_singletons)
+
+
+@pytest.mark.skipif(shutil.which('TreeCluster.py') is None, reason='TreeCluster.py not on PATH')
+def test_cuts_below_the_peak_are_not_offered(tmp_path):
+    _, tree = _tree(tmp_path, 40, 2)
+    offered = cut_options(tree, 0.0)
+    # just below the first offered cut, there are fewer multi-member clusters
+    below = offered[0].threshold_min - 1e-9
+    if below >= 0:
+        assert _treecluster_groups(tree, below)[0] <= offered[0].n_clusters
 
 
 def test_parse_panel_size():
@@ -76,11 +89,11 @@ def test_low_coverage_count():
     assert low_coverage_count(9, 0.05, 100) == 0         # 0.47 rounds down
     assert low_coverage_count(10, 0.05, 100) == 1        # 0.53 rounds up
     assert low_coverage_count(40, 0.0, 100) == 0
-    assert low_coverage_count(98, 0.2, 100) == 2         # cannot exceed the pool
+    assert low_coverage_count(80, 0.2, 2) == 2           # only 2 structures left to add
 
 
 def _options(*sizes):
-    return [CutOption(k, 0.1 * i, 0.1 * (i + 1), 0) for i, k in enumerate(sizes)]
+    return [CutOption(k, 0, 0.1 * i, 0.1 * (i + 1), 0) for i, k in enumerate(sizes)]
 
 
 def test_choose_cuts_closest_and_ranges():
@@ -88,24 +101,24 @@ def test_choose_cuts_closest_and_ranges():
     assert [o.n_clusters for o in choose_cuts(options, [(20, 20)])] == [20]
     # 22 is 2 from 20 and 24: the smaller panel wins the tie
     assert [o.n_clusters for o in choose_cuts(_options(30, 24, 20, 13), [(22, 22)])] == [20]
-    assert [o.n_clusters for o in choose_cuts(_options(30, 24, 20, 13), [(10, 25)])] == [13, 20, 24]
+    assert [o.n_clusters for o in choose_cuts(_options(30, 24, 20, 13), [(10, 25)])] == [24, 20, 13]
     # nothing in range -> closest to it
     assert [o.n_clusters for o in choose_cuts(_options(30, 24, 20, 13), [(14, 18)])] == [13]
     assert [o.n_clusters for o in choose_cuts(_options(30, 24, 20, 13), [(100, 200)])] == [30]
 
 
 def test_choose_cuts_include_additions():
-    options = [CutOption(k, 0.1 * i, 0.1 * (i + 1), low_coverage_count(k, 0.05, 500))
+    options = [CutOption(k, 50, 0.1 * i, 0.1 * (i + 1), low_coverage_count(k, 0.05, 50))
                for i, k in enumerate([60, 57, 50, 40])]
     chosen = choose_cuts(options, [(60, 60)])
     assert [(o.n_clusters, o.panel_size) for o in chosen] == [(57, 60)]
 
 
 def test_threshold_is_short_and_inside_interval():
-    assert CutOption(5, 0.1534, 0.2011, 0).threshold == 0.18
-    assert CutOption(5, 0.15341, 0.15349, 0).threshold == 0.15345
-    assert CutOption(1, 0.734, float('inf'), 0).threshold == 0.74
-    assert CutOption(9, 0.0, 0.004, 0).threshold == 0.0
+    assert CutOption(5, 0, 0.1534, 0.2011, 0).threshold == 0.18
+    assert CutOption(5, 0, 0.15341, 0.15349, 0).threshold == 0.15345
+    assert CutOption(1, 0, 0.734, float('inf'), 0).threshold == 0.74
+    assert CutOption(9, 0, 0.0, 0.004, 0).threshold == 0.0
 
 
 def test_add_low_coverage_is_farthest_first():
@@ -117,19 +130,22 @@ def test_add_low_coverage_is_farthest_first():
         [0.3, 0.3, 0.95, 1.0, 0.4],
         [0.2, 0.2, 0.4, 0.4, 1.0],
     ]), index=names, columns=names)
+    everyone = names
     # e is worst covered by {a}; after adding e, c/d tie at 0.4 -> c by name
-    assert add_low_coverage(tm, ['a'], 2) == [('e', 0.2), ('c', 0.4)]
-    # never more additions than structures outside the panel
-    assert [name for name, _ in add_low_coverage(tm, ['a', 'b'], 10)] == ['e', 'c', 'd']
+    assert add_low_coverage(tm, ['a'], 2, everyone) == [('e', 0.2), ('c', 0.4)]
+    # never more additions than candidates outside the panel
+    assert [name for name, _ in add_low_coverage(tm, ['a', 'b'], 10, everyone)] == ['e', 'c', 'd']
+    # only candidates are added, even when others are covered worse
+    assert add_low_coverage(tm, ['a'], 5, ['c', 'd']) == [('c', 0.3), ('d', 0.95)]
 
 
-def test_choose_cuts_same_size_keeps_most_clusters():
-    # 12 structures with 20 % additions: the pool-size cap gives 12 = 12+0 = 11+1 = 10+2
-    options = [CutOption(k, 0.1 * i, 0.1 * (i + 1), low_coverage_count(k, 0.2, 12))
-               for i, k in enumerate([12, 11, 10, 9])]
-    assert [o.panel_size for o in options] == [12, 12, 12, 11]
+def test_choose_cuts_same_size_keeps_fewest_singletons():
+    # the singleton cap can give two cuts the same panel size: 10+2 and 12+0
+    options = [CutOption(12, 0, 0.0, 0.1, 0), CutOption(10, 2, 0.1, 0.2, 2),
+               CutOption(9, 1, 0.2, 0.3, 1)]
+    assert [o.panel_size for o in options] == [12, 12, 10]
     assert [o.n_clusters for o in choose_cuts(options, [(12, 12)])] == [12]
-    assert [o.n_clusters for o in choose_cuts(options, [(1, 20)])] == [9, 12]
+    assert [o.n_clusters for o in choose_cuts(options, [(1, 20)])] == [12, 9]
 
 
 def test_tree_is_reused_only_for_identical_inputs(tmp_path, capsys):
@@ -151,3 +167,35 @@ def test_low_coverage_additions_off_by_default():
     from colabalign.cli import script_args
     assert script_args(['-i', 'x', '-o', 'y']).low_coverage_fraction == 0
     assert script_args(['-i', 'x', '-o', 'y', '-l', '0.05']).low_coverage_fraction == 0.05
+
+
+def test_build_panel_takes_singletons_first_then_cluster_members(tmp_path):
+    import csv
+    from conftest import make_structure_set
+    from colabalign.panel import build_panel
+    files = make_structure_set(tmp_path / 'm', per_family=2)          # 6 structures
+    names = sorted(p.stem for p in files)
+    a, b, c, d, e, f = names
+    tm = pd.DataFrame(0.5, index=names, columns=names)
+    for x, y, score in [(a, b, 0.9), (a, c, 0.6), (d, e, 0.8), (f, a, 0.1), (f, d, 0.1),
+                        (c, f, 0.1), (b, f, 0.1), (e, f, 0.1)]:
+        tm.loc[x, y] = tm.loc[y, x] = score
+    for name in names:
+        tm.loc[name, name] = 1.0
+    clusters = {1: [a, b, c], 2: [d, e], -1: [f]}
+    reps = {1: {'record_name': a}, 2: {'record_name': d}}
+    models = {p.stem: p for p in files}
+
+    # 2 clusters with f = 0.5 -> 2 additions: the singleton, then the worst-covered member (c)
+    row = build_panel('0.50', clusters, reps, tm, 0.5, models, tmp_path / 'out')
+    with open(tmp_path / 'out' / 'threshold_0.50_panel.csv', newline='', encoding='utf-8') as h:
+        panel = [(r['structure'], r['role'], r['cluster'], r['cluster_size']) for r in csv.DictReader(h)]
+    assert panel == [(a, 'cluster_representative', '1', '3'), (d, 'cluster_representative', '2', '2'),
+                     (f, 'low_coverage', '-1', '1'), (c, 'low_coverage', '1', '3')]
+    assert (row['panel_size'], row['low_coverage_additions'], row['singletons'],
+            row['singletons_in_panel']) == (4, 2, 1, 1)
+
+    # with f = 0.2 -> 1 addition, and it is the singleton even though c is also poorly covered
+    row = build_panel('0.20', clusters, reps, tm, 0.2, models, tmp_path / 'out2')
+    with open(tmp_path / 'out2' / 'threshold_0.20_panel.csv', newline='', encoding='utf-8') as h:
+        assert [r['structure'] for r in csv.DictReader(h)] == [a, d, f]
