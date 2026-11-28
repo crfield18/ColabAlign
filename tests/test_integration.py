@@ -228,6 +228,8 @@ def test_end_to_end_panel_sizes(tmp_path, usalign, treecluster):  # pylint: disa
         assert set(members) <= names
         roles = [r['role'] for r in rows]
         assert roles.count('low_coverage') == int(panel['low_coverage_additions'])
+        # singletons are already panel members, so additions come from real clusters
+        assert all(r['cluster'] != '-1' for r in rows if r['role'] == 'low_coverage')
         assert sum(int(r['structures_represented']) for r in rows) == len(src)
         # every cluster directory has all its members, superposed or copied
         tsv = pd.read_csv(results / 'clusters' / f"{panel['threshold']}.tsv", sep='\t')
@@ -241,6 +243,7 @@ def test_end_to_end_panel_sizes(tmp_path, usalign, treecluster):  # pylint: disa
 
 
 def test_end_to_end_default_threshold(tmp_path, usalign, treecluster):  # pylint: disable=unused-argument
+    import csv
     from colabalign.pipeline import main
     from conftest import make_structure_set
 
@@ -251,6 +254,8 @@ def test_end_to_end_default_threshold(tmp_path, usalign, treecluster):  # pylint
     assert (results / 'clusters' / '0.20.tsv').is_file()
     assert (results / 'clusters' / '0.20' / 'threshold_0.20_panel.csv').is_file()
     assert (results / 'panels.csv').is_file() and (results / 'panel_sizes.csv').is_file()
+    with open(results / 'panels.csv', newline='', encoding='utf-8') as f:
+        assert [row['low_coverage_additions'] for row in csv.DictReader(f)] == ['0']  # -l 0 default
 
 
 def test_no_superpose_gives_same_panels(tmp_path, usalign, treecluster):  # pylint: disable=unused-argument

@@ -493,13 +493,13 @@ The panel for threshold $t$ starts with one structure per cluster: each cluster'
 
 The **coverage** of structure $i$ is its best TM-score to any panel member, $c_i = \max_{j \in P} T_{ij}$, so panel members have $c_i = 1$. Because clusters are defined by linkage averages (§6), some members of large clusters can be poorly matched by their representative. The panel is topped up with $a$ of them, farthest-first: add $\arg\min_{i \notin P} c_i$, update every $c_i$, and repeat. Updating after each addition stops two near-identical outliers both being added. Ties go to the first name alphabetically.
 
-`-l/--low-coverage-fraction` sets the share $f$ of the final panel given to these additions (default 0.05):
+`-l/--low-coverage-fraction` sets the share $f$ of the final panel given to these additions (default 0, no additions):
 
 $$
 a(K) \;=\; \min\!\left(\left\lfloor \frac{f K}{1 - f} + \tfrac12 \right\rfloor,\ n - K\right),
 $$
 
-so that $a / (K + a) \approx f$. With $f = 0.05$, a 57-cluster cut gets 3 additions (panel of 60) and a cut with 9 or fewer clusters gets none. `-l 0` turns this off.
+so that $a / (K + a) \approx f$. With $f = 0.05$, a 57-cluster cut gets 3 additions (panel of 60) and a cut with 9 or fewer clusters gets none. Singletons are already panel members ($c_i = 1$), so additions always come from clusters with two or more members.
 
 For each threshold, the panel is written to `clusters/<t>/threshold_<t>_panel.csv` (one row per member: role, cluster, cluster size, how many structures it is the best match for, and, for additions, its coverage when it was added) and `threshold_<t>_panel.fasta`. `results/panels.csv` summarises every panel: its size, composition, and the mean, 10th percentile and minimum of $c_i$ over all $n$ structures. Panel members are included in these, with $c_i = 1$.
 
@@ -541,7 +541,7 @@ For each threshold, the panel is written to `clusters/<t>/threshold_<t>_panel.cs
 | `-c/--cores` | 2 | Worker processes. Values below 1 are raised to 1; values above `cpu_count()` are capped |
 | `-n/--panel-size` | none | One or more panel sizes, each `N` (closest achievable) or `MIN-MAX` (every achievable size in the range); $t$ is chosen for each (§6.1) |
 | `-t/--threshold` | 0.20 if no `-n` | One or more `max_clade` thresholds $t \in [0.01, 1]$; a cluster's linkage-level TM-score is at least $1 - t$ |
-| `-l/--low-coverage-fraction` | 0.05 | Share of each panel given to low-coverage additions, from 0 to 0.5 (§9.3) |
+| `-l/--low-coverage-fraction` | 0 | Share of each panel given to low-coverage additions, from 0 to 0.5 (§9.3) |
 | `--no-superpose` | off | Skip Stage 5: no structure files are written to `clusters/`, and the MSAs read sequences from `models/` instead. Representatives, alignments and panels are identical |
 | `-m/--mode` | `all` | `all` chains, or only the `first` chain of each input |
 | `-u/--usalign` | `USalign` | Path to the US-align executable |

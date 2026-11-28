@@ -145,3 +145,9 @@ def test_tree_is_reused_only_for_identical_inputs(tmp_path, capsys):
     grow_tree(changed, models, tmp_path)
     assert 'Generating structural dendrogram' in capsys.readouterr().out
     assert (tmp_path / 'colabalign.tree').read_text() != first
+
+
+def test_low_coverage_additions_off_by_default():
+    from colabalign.cli import script_args
+    assert script_args(['-i', 'x', '-o', 'y']).low_coverage_fraction == 0
+    assert script_args(['-i', 'x', '-o', 'y', '-l', '0.05']).low_coverage_fraction == 0.05

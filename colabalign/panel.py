@@ -22,7 +22,7 @@ from Bio import Phylo
 
 from .common import extract_sequence
 
-DEFAULT_LOW_COVERAGE_FRACTION = 0.05
+DEFAULT_LOW_COVERAGE_FRACTION = 0.0
 MAX_LOW_COVERAGE_FRACTION = 0.5
 
 

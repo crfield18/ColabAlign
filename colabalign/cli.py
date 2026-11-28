@@ -98,9 +98,9 @@ def build_parser() -> ArgumentParser:
         metavar='FLOAT',
         help=(
             'Fraction of each panel given to low-coverage structures: those whose '
-            'best TM-score to the panel is lowest, added one at a time '
-            f'(Default = {DEFAULT_LOW_COVERAGE_FRACTION}; 0 turns this off; '
-            f'maximum {MAX_LOW_COVERAGE_FRACTION}).'
+            'best TM-score to the panel is lowest, added one at a time, e.g. 0.05 '
+            f'(Default = {DEFAULT_LOW_COVERAGE_FRACTION:g}, no additions; '
+            f'maximum {MAX_LOW_COVERAGE_FRACTION:g}).'
         )
     )
     parser.add_argument(
